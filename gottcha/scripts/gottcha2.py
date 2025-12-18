@@ -2,7 +2,7 @@
 
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", "Anna Chernikov", "Jason Gans", "Tracey Freites", "Patrick Chain"]
-__version__   = "2.1.10"
+__version__   = "2.1.11"
 __copyright__ = """
 Copyright (2019). Traid National Security, LLC. This material was produced
 under U.S. Government contract DE-AC52-06NA25396 for Los Alamos National Laboratory
@@ -151,8 +151,8 @@ def parse_params(ver, args):
     p.add_argument( '-mf','--matchFactor', metavar='<FLOAT>', type=float, default=0,
                     help="Minimum fraction of the read or signature fragment required to be considered a valid match. [default: 0]")
 
-    p.add_argument( '-a','--ani', metavar='<FLOAT>[,<FLOAT>]', type=str, default='0.95,0.99',
-                    help="ANI thresholds for taxonomic aggregation: species level (first value), strain level (second value). [default: 0.95,0.99]")
+    p.add_argument( '-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str, default='0.9,0.95,0.99',
+                    help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.8,0.95,0.99]")
 
     p.add_argument( '-nc','--noCutoff', action="store_true",
                     help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -A 0,0]")
@@ -165,6 +165,9 @@ def parse_params(ver, args):
 
     p.add_argument( '-c','--stdout', action="store_true",
                     help="Write on standard output.")
+
+    p.add_argument( '--mpa', action="store_true",
+                    help="Generate output in MetaPhlAn format.")
 
     eg.add_argument( '-v','--version', action="store_true",
                     help="Print version number.")
@@ -252,7 +255,7 @@ def parse_params(ver, args):
         args_parsed.minLen = 0
         args_parsed.matchFactor = 0
         args_parsed.maxZscore = 0
-        args_parsed.ani = '0,0'
+        args_parsed.sniScore = '0,0,0'
 
     if args_parsed.nanopore:
         args_parsed.presetx = 'map-ont'
@@ -907,7 +910,7 @@ def group_refs_to_strains(r):
 
     return str_df
 
-def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, ani_species, ani_strain):
+def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, sni_score_strain, sni_score_cutoff):
     """
     Aggregate strain-level results to higher taxonomic ranks.
     
@@ -930,8 +933,9 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, ani_species, ani_str
         mr (int): Minimum read count threshold
         ml (int): Minimum covered signature length threshold
         mz (float): Maximum Z-score threshold (0 to disable)
-        ani_species (float): ANI cutoff for species level
-        ani_strain (float): ANI cutoff for strain level
+        sni_score_cutoff (float): SNI-score cutoff for all levels
+        sni_score_species (float): SNI-score cutoff for species level
+        sni_score_strain (float): SNI-score cutoff for strain level
         
     Returns:
         pandas.DataFrame: DataFrame with rolled-up taxonomy at all ranks
@@ -962,9 +966,9 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, ani_species, ani_str
     # decide top signature level, convert the rank to the corresponding number
     str_df['SIG_LEVEL'] = str_df['SIG_LEVEL'].map(major_ranks)
 
-    # infer the ANI for each strain
+    # infer the SNI-score for each strain
     str_df["SIG_COV"] = str_df["COVERED_SIG_LEN"]/str_df["TOTAL_SIG_LEN"]
-    str_df = infer_ani(str_df, error_rate=0.005, conf=0.95)
+    str_df = infer_sni_score(str_df, error_rate=0.005)
 
     total_abundance = str_df[abu_col].sum()
 
@@ -1003,17 +1007,17 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, ani_species, ani_str
                 'SIG_LEVEL': 'max',
                 'GENOME_COUNT': 'count', 
                 'GENOME_SIZE': 'sum',
-                'ANI_CI95': 'max',
+                'SNI_SCORE': 'max',
                 'NOTE': lambda x: '; '.join(list(x.unique()))
             })
 
-            # find the index of the row with max ANI_CI95 in each group
+            # find the index of the row with max SNI_SCORE in each group
             # pull out the low/high bounds from those rows
-            idx = str_df.groupby('LVL_NAME')['ANI_CI95'].idxmax()
-            ani_bounds = ( str_df
-                        .loc[idx, ['LVL_NAME', 'ANI_NAIVE', 'ANI_CI95_LH']]
+            idx = str_df.groupby('LVL_NAME')['SNI_SCORE'].idxmax()
+            score_bounds = ( str_df
+                        .loc[idx, ['LVL_NAME', 'SNI_NAIVE', 'SNI_CI95_LH']]
                         .set_index('LVL_NAME') )
-            lvl_df = lvl_df.join(ani_bounds).reset_index()
+            lvl_df = lvl_df.join(score_bounds).reset_index()
 
         # calculate the relative abundance of each taxon
         # the abundance and the relative abundance is calculated based on the specified column (abu_col)
@@ -1039,13 +1043,17 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, ani_species, ani_str
         idx = lvl_df['SIG_LEVEL'] < major_ranks[rank]
         lvl_df.loc[idx, 'NOTE'] += f"Not shown ({rank}-result could be biased); "
 
-        # add ANI reason
+        # add SCORE reason
         if rank == 'strain':
-            filtered = (lvl_df['ANI_CI95'] < ani_strain)
-            lvl_df.loc[filtered, 'NOTE'] += "Filtered out (strain ANI > " + lvl_df.loc[filtered, 'ANI_CI95'].astype(str) + "); "
+            filtered = (lvl_df['SNI_SCORE'] < sni_score_strain)
+            lvl_df.loc[filtered, 'NOTE'] += "Filtered out (strain SNI_SCORE > " + lvl_df.loc[filtered, 'SNI_SCORE'].astype(str) + "); "
         elif rank == 'species':
-            filtered = (lvl_df['ANI_CI95'] < ani_species)
-            lvl_df.loc[filtered, 'NOTE'] += "Filtered out (species ANI > " + lvl_df.loc[filtered, 'ANI_CI95'].astype(str) + "); "
+            filtered = (lvl_df['SNI_SCORE'] < sni_score_species)
+            lvl_df.loc[filtered, 'NOTE'] += "Filtered out (species SNI_SCORE > " + lvl_df.loc[filtered, 'SNI_SCORE'].astype(str) + "); "
+        else:
+            filtered = (lvl_df['SNI_SCORE'] < sni_score_cutoff)
+            lvl_df.loc[filtered, 'NOTE'] += "Filtered out (SNI_SCORE cutoff > " + lvl_df.loc[filtered, 'SNI_SCORE'].astype(str) + "); "
+
 
         # add filtered reason
         filtered = (lvl_df['BEST_SIG_COV'] < mc)
@@ -1078,9 +1086,9 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, ani_species, ani_str
     return rep_df
 
 
-def infer_ani(df, error_rate=0.005, conf=0.95):
+def infer_sni_score(df, error_rate=0.005):
     """
-    Estimate the Average Nucleotide Identity (ANI) together with 95% confidence intervals:
+    Estimate the Average Nucleotide Identity (SNI-score) together with 95% confidence intervals:
     - removes the expected 0.5 % sequencing-error penalty
     - widens the interval when only a fraction of the signature space is actually covered ( SIG_COV )
     - project mismatches onto those unique positions
@@ -1090,7 +1098,7 @@ def infer_ani(df, error_rate=0.005, conf=0.95):
     df = df.copy()
 
     # from scipy.stats import norm
-    # z = norm.ppf(0.5 + conf/2)  # ≈ 1.96
+    # z = norm.ppf(0.5 + conf/2)  # ≈1.96
     z = 1.959963984540054
 
     # use only unique covered signature bases
@@ -1103,7 +1111,7 @@ def infer_ani(df, error_rate=0.005, conf=0.95):
     m_rate_adj = df["TOTAL_BP_MISMATCH"]*(1-error_rate)/df["TOTAL_BP_MAPPED"]
     m_rate_adj = m_rate_adj.clip(lower=1e-12)  # avoid negative values
 
-    # observed ANI
+    # observed SCORE
     p_hat = 1 - m_rate_adj
     p = 1 - m_rate
 
@@ -1111,20 +1119,6 @@ def infer_ani(df, error_rate=0.005, conf=0.95):
     cov    = df["SIG_COV"].clip(lower=1e-12)  # avoid n_eff = 0
     n_eff  = df["COVERED_SIG_LEN"] * cov      # down-weight poor coverage
     
-    # # use only unique covered signature bases
-    # n = df["TOTAL_BP_MAPPED"]
-    # # project mismatches onto those unique positions
-    # m = df["TOTAL_BP_MISMATCH"]*(1-error_rate)
-    # # indel
-    # i = df["TOTAL_BP_INDEL"]
-
-    # # observed ANI
-    # p_hat = (2*n + i - 2*m) / (2*n + i)
-
-    # # down-weight poor coverage
-    # cov    = df["SIG_COV"].clip(lower=1e-10)  # avoid n_eff = 0
-    # n_eff  = df["COVERED_SIG_LEN"] * cov      # down-weight poor coverage
-
     z2     = z ** 2
     center = (p_hat + z2 / (2 * n_eff)) / (1 + z2 / n_eff)
     hw     = (z * np.sqrt(
@@ -1134,17 +1128,17 @@ def infer_ani(df, error_rate=0.005, conf=0.95):
     # observed-identity CI
     id_low, id_high = center - hw, center + hw
     
-    # convert to true ANI by adding the sequencing-error penalty
-    ani_naive  = np.minimum(1, p)
-    ani_low  = np.clip(id_low, 0, 1)
-    ani_high = np.clip(id_high, 0, 1)
+    # convert to true SCORE by adding the sequencing-error penalty
+    score_naive = np.minimum(1, p)
+    score_low  = np.clip(id_low, 0, 1)
+    score_high = np.clip(id_high, 0, 1)
 
-    ani_ci95 = "[" + ani_low.round(6).astype(str) + "-" + ani_high.round(6).astype(str) + "]"
+    score_ci95 = "[" + score_low.round(6).astype(str) + "-" + score_high.round(6).astype(str) + "]"
 
     df = df.assign(
-        ANI_NAIVE   = ani_naive.round(6),
-        ANI_CI95    = center.round(6),
-        ANI_CI95_LH = ani_ci95
+        SNI_NAIVE    = score_naive.round(6),
+        SNI_SCORE    = center.round(6),
+        SNI_CI95_LH  = score_ci95
     )
 
     return df
@@ -1177,7 +1171,7 @@ def pile_lvl_zscore(tol_bp, tol_sig_len, linear_len):
     except:
         return 0
     
-def generaete_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
+def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
     """
     Generate taxonomy profiling result files in TSV or CSV format.
     
@@ -1196,9 +1190,9 @@ def generaete_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
 
     # Fields for full mode
     cols = ['LEVEL', 'NAME', 'TAXID', 'READ_COUNT', 'TOTAL_BP_MAPPED',
-            'ANI_CI95', 'COVERED_SIG_LEN', 'BEST_SIG_COV', 'DEPTH', 'REL_ABUNDANCE', # summary
+            'SNI_SCORE', 'COVERED_SIG_LEN', 'BEST_SIG_COV', 'DEPTH', 'REL_ABUNDANCE', # summary
             'PARENT_NAME', 'PARENT_TAXID', # parants
-            'TOTAL_READ_LEN', 'READ_IDT', 'TOTAL_BP_MISMATCH', 'TOTAL_BP_INDEL', 'ANI_NAIVE', 'ANI_CI95_LH', # read stats
+            'TOTAL_READ_LEN', 'READ_IDT', 'TOTAL_BP_MISMATCH', 'TOTAL_BP_INDEL', 'SNI_NAIVE', 'SNI_CI95_LH', # read stats
             'SIG_COV', 'MAPPED_SIG_LEN', 'TOTAL_SIG_LEN', 'COVERED_SIG_DEPTH', 'COVERED_MAPPED_SIG_COV', 'ZSCORE', # signature stats
             'GENOMIC_CONTENT_EST', 'ABUNDANCE', 'REL_ABUNDANCE_DEPTH', 'REL_ABUNDANCE_GC', # abundance
             'SIG_LEVEL', 'GENOME_COUNT', 'GENOME_SIZE', 'NOTE' # ref genome
@@ -1224,7 +1218,7 @@ def generaete_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
 
     return True
 
-def generaete_biom_file(res_df, o, tg_rank, sampleid):
+def generate_biom_file(res_df, o, tg_rank, sampleid):
     """
     Generate a BIOM format file from taxonomy results.
     
@@ -1263,7 +1257,7 @@ def generaete_biom_file(res_df, o, tg_rank, sampleid):
 
     return True
 
-def generaete_lineage_file(target_df, o):
+def generate_lineage_file(target_df, o):
     """
     Generate a lineage file showing taxonomic paths with abundances.
     
@@ -1280,6 +1274,27 @@ def generaete_lineage_file(target_df, o):
     lineage_df = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, True, True)).str.split('|', expand=True)
     result = pd.concat([target_df['ABUNDANCE'], lineage_df], axis=1, sort=False)
     result.to_csv(o, index=False, header=False, sep='\t', float_format='%.4f')
+
+    return True
+
+def generate_mpa_file(target_df, o):
+    """
+    Generate a lineage file showing taxonomic lineage with abundances in MPA format.
+    
+    Creates a tab-delimited file with abundance values followed by
+    the complete taxonomic lineage for each taxon.
+    
+    Parameters:
+        target_df (pandas.DataFrame): DataFrame containing abundance and taxids
+        o (str): Output file path
+        
+    Returns:
+        bool: True if successful
+    """
+
+    lineage_df = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, all_major_rank=True, print_strain=False, space2underscore=True, sep="|"))
+    result = pd.concat([target_df[['TAXID', 'REL_ABUNDANCE', 'READ_COUNT', 'SIG_COV']], lineage_df], axis=1, sort=False)
+    result.to_csv(o, index=False, header=True, sep='\t', float_format='%.4f')
 
     return True
 
@@ -1311,7 +1326,7 @@ def readMapping(reads, db, threads, mm_options, presetx, samfile, logfile):
     input_file = " ".join([x.name for x in reads])
 
     # Minimap2 options for short reads: the options here is essentailly the -x 'sr' equivalent with some modifications on scoring
-    sr_opts = f"-x sr {mm_options} -a -N20 --secondary=no --sam-hit-only"
+    sr_opts = f"-x sr {mm_options} -a -N20 --MD --secondary=no --sam-hit-only"
     
     if presetx != 'sr':
         sr_opts = f"-x {presetx} -N20 --secondary=no --sam-hit-only -a"
@@ -1655,6 +1670,7 @@ def main(args):
     argvs.relAbu = argvs.relAbu.upper()
     outfile_full = "%s/%s.full.tsv" % (argvs.outdir, argvs.prefix)
     outfile_lineage = "%s/%s.lineage.tsv" % (argvs.outdir, argvs.prefix)
+    outfile_mpa = "%s/%s.mpa.tsv" % (argvs.outdir, argvs.prefix)
 
     # remove previous log file if exists
     if os.path.isfile(logfile):
@@ -1677,7 +1693,7 @@ def main(args):
 
         out_fp = open(outfile, 'w')
 
-    print_message( f"Starting GOTTCHA (v{__version__})", argvs.silent, begin_t, logfile )
+    print_message( f"GOTTCHA (v{__version__})", argvs.silent, begin_t, logfile )
     print_message( f"Arguments and dependencies checked:", argvs.silent, begin_t, logfile )
     if argvs.input:
         print_message( f"    Input reads        : {[x.name for x in argvs.input]}",     argvs.silent, begin_t, logfile )
@@ -1697,7 +1713,7 @@ def main(args):
     print_message( f"    Minimal reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile )
     print_message( f"    Minimal mFactor    : {argvs.matchFactor}", argvs.silent, begin_t, logfile )
     print_message( f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile )
-    print_message( f"    ANI(species,strain): {argvs.ani}",   argvs.silent, begin_t, logfile )
+    print_message( f"    SNI-score (g,s,n)  : {argvs.sniScore}",   argvs.silent, begin_t, logfile )
 
     #load taxonomy
     print_message( "Loading taxonomy information...", argvs.silent, begin_t, logfile )
@@ -1773,11 +1789,16 @@ def main(args):
         gc.collect()
 
         if mapped_r_cnt:
-            # ANI default to species 0.95, strain 0.99
-            (ani_species, ani_strain) = [float(x) for x in (argvs.ani.split(',') + ['0.99'])[:2]]
+            # Set SNI-SCORE default to 0.8, species 0.95, strain 0.99
+            if ',' not in argvs.sniScore:
+                argvs.sniScore = ','.join([argvs.sniScore]*3)
+            elif argvs.sniScore.count(',') == 1:
+                argvs.sniScore = argvs.sniScore + ',0.99'
+
+            (sni_score_cutoff, sni_score_species, sni_score_strain) = [float(x) for x in argvs.sniScore.split(',')]
 
             # aggregate the results
-            res_df = aggregate_taxonomy(res, argvs.relAbu, argvs.dbLevel , argvs.minCov, argvs.minReads, argvs.minLen, argvs.maxZscore, ani_species, ani_strain)
+            res_df = aggregate_taxonomy(res, argvs.relAbu, argvs.dbLevel , argvs.minCov, argvs.minReads, argvs.minLen, argvs.maxZscore, sni_score_species, sni_score_strain, sni_score_cutoff)
             print_message( "Done taxonomy aggregation.", argvs.silent, begin_t, logfile )
 
             if not len(res_df):
@@ -1785,17 +1806,21 @@ def main(args):
             else:
                 # generate output results
                 if argvs.format == "biom":
-                    generaete_biom_file(res_df, out_fp, argvs.dbLevel, argvs.prefix)
+                    generate_biom_file(res_df, out_fp, argvs.dbLevel, argvs.prefix)
                 else:
-                    generaete_taxonomy_file(res_df, out_fp, outfile_full, argvs.format)
+                    generate_taxonomy_file(res_df, out_fp, outfile_full, argvs.format)
                 # generate lineage file
                 target_idx = (res_df['LEVEL']==argvs.dbLevel) & \
                                 (res_df['NOTE'].str.contains('Filtered out', na=False) == False) & \
                                 (res_df['NOTE'].str.contains('Not shown', na=False) == False)
-                target_df = res_df.loc[target_idx, ['ABUNDANCE','TAXID']]
+                target_df = res_df.loc[target_idx,:]
                 tax_num = len(target_df)
                 if tax_num:
-                    generaete_lineage_file(target_df, outfile_lineage)
+                    generate_lineage_file(target_df, outfile_lineage)
+
+                if argvs.mpa:
+                    generate_mpa_file(target_df, outfile_mpa)
+                    print_message( f"MPA format file saved to {outfile_mpa}.", argvs.silent, begin_t, logfile )
 
                 print_message( f"{tax_num} qualified {argvs.dbLevel} profiled; Results saved to {outfile}.", argvs.silent, begin_t, logfile )
         else:
