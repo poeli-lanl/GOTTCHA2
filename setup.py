@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
-from setuptools import setup, find_packages
-from gottcha.scripts.gottcha2 import __version__ as version
 import os
 import sys
+from setuptools import setup, find_packages
 
-# Add the current directory to Python path to import version
+# Ensure local package imports work when setup.py is executed in an isolated build env.
 sys.path.insert(0, os.path.dirname(__file__))
+
+from gottcha._version import __version__ as version
 
 # Read README file
 readme_path = os.path.join(os.path.dirname(__file__), 'README.md')
@@ -46,7 +47,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'gottcha2=cmd:gottcha2_command',
+            'gottcha2=gottcha.scripts.cmd:gottcha2_command',
         ],
     },
     scripts=['gottcha/scripts/gottcha2.py', 'gottcha/scripts/pull_database.py', 'gottcha/scripts/taxonomy.py', 'gottcha/scripts/cmd.py'],

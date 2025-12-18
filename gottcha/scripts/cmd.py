@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
-import pull_database
-import gottcha2
+try:
+    # Package usage (installed)
+    from . import pull_database
+    from . import gottcha2
+except ImportError:  # pragma: no cover
+    # Script usage (running from source directory)
+    import pull_database
+    import gottcha2
 import sys
 
 def usage():
