@@ -152,7 +152,7 @@ def parse_params(ver, args):
                     help="Minimum fraction of the read or signature fragment required to be considered a valid match. [default: 0]")
 
     p.add_argument( '-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str, default='0.9,0.95,0.99',
-                    help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.8,0.95,0.99]")
+                    help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
 
     p.add_argument( '-nc','--noCutoff', action="store_true",
                     help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -A 0,0]")
