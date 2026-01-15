@@ -2,7 +2,7 @@
 
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", "Anna Chernikov", "Jason Gans", "Tracey Freites", "Patrick Chain"]
-__version__   = "2.1.11"
+__version__   = "2.1.12"
 __copyright__ = """
 Copyright (2019). Traid National Security, LLC. This material was produced
 under U.S. Government contract DE-AC52-06NA25396 for Los Alamos National Laboratory
@@ -163,6 +163,12 @@ def parse_params(ver, args):
     p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
                     help="The multiple hit removal step is automatically enabled for sequence input files and disabled for SAM files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
 
+    p.add_argument( '-rs','--removeIncSplitReads', action="store_true",
+                    help="Remove inconsistent split-reads from the SAM file. This option is only applicable for long-read data.")
+
+    p.add_argument( '-er','--errorRate', metavar='<FLOAT>', type=float, default=0.005,
+                    help="Estimated error rate for sequencing data. [default: 0.005]")
+
     p.add_argument( '-c','--stdout', action="store_true",
                     help="Write on standard output.")
 
@@ -259,15 +265,12 @@ def parse_params(ver, args):
 
     if args_parsed.nanopore:
         args_parsed.presetx = 'map-ont'
-        args_parsed.minReads = 1
+        args_parsed.minReads = 0
         args_parsed.matchFactor = 0
         args_parsed.maxZscore = 0
 
     if args_parsed.m2options == 'auto':
-        if args_parsed.presetx == 'sr':
-            args_parsed.m2options = '-s60'
-        else:
-            args_parsed.m2options = ''
+        args_parsed.m2options = '-s60'
 
     return args_parsed
 
@@ -910,7 +913,7 @@ def group_refs_to_strains(r):
 
     return str_df
 
-def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, sni_score_strain, sni_score_cutoff):
+def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, sni_score_strain, sni_score_cutoff, error_rate):
     """
     Aggregate strain-level results to higher taxonomic ranks.
     
@@ -968,7 +971,7 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
 
     # infer the SNI-score for each strain
     str_df["SIG_COV"] = str_df["COVERED_SIG_LEN"]/str_df["TOTAL_SIG_LEN"]
-    str_df = infer_sni_score(str_df, error_rate=0.005)
+    str_df = infer_sni_score(str_df, error_rate)
 
     total_abundance = str_df[abu_col].sum()
 
@@ -1086,7 +1089,7 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
     return rep_df
 
 
-def infer_sni_score(df, error_rate=0.005):
+def infer_sni_score(df, error_rate):
     """
     Estimate the Average Nucleotide Identity (SNI-score) together with 95% confidence intervals:
     - removes the expected 0.5 % sequencing-error penalty
@@ -1108,7 +1111,7 @@ def infer_sni_score(df, error_rate=0.005):
     m_rate = (df["TOTAL_BP_MISMATCH"]/df["TOTAL_BP_MAPPED"])
     m_rate = m_rate.clip(lower=1e-12)  # avoid negative values
 
-    m_rate_adj = df["TOTAL_BP_MISMATCH"]*(1-error_rate)/df["TOTAL_BP_MAPPED"]
+    m_rate_adj = df["TOTAL_BP_MISMATCH"]/df["TOTAL_BP_MAPPED"] - error_rate
     m_rate_adj = m_rate_adj.clip(lower=1e-12)  # avoid negative values
 
     # observed SCORE
@@ -1292,7 +1295,7 @@ def generate_mpa_file(target_df, o):
         bool: True if successful
     """
 
-    lineage_df = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, all_major_rank=True, print_strain=False, space2underscore=True, sep="|"))
+    lineage_df = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, all_major_rank=True, print_strain=False, space2underscore=True, sep=";"))
     result = pd.concat([target_df[['TAXID', 'REL_ABUNDANCE', 'READ_COUNT', 'SIG_COV']], lineage_df], axis=1, sort=False)
     result.to_csv(o, index=False, header=True, sep='\t', float_format='%.4f')
 
@@ -1333,7 +1336,7 @@ def readMapping(reads, db, threads, mm_options, presetx, samfile, logfile):
 
     bash_cmd   = f"set -o pipefail; set -x;"
     mm2_cmd    = f"minimap2 {sr_opts} -t{threads} {db}.mmi {input_file}"
-    filter_cmd = f"grep -v '^@'"
+    filter_cmd = f"sed '/^@/d'"  # filter out header lines
     cmd        = f"{bash_cmd} {mm2_cmd} 2>> {logfile} | {filter_cmd} > {samfile}"
 
     logging.info(f"Readmapping command: {mm2_cmd}")
@@ -1343,6 +1346,57 @@ def readMapping(reads, db, threads, mm_options, presetx, samfile, logfile):
     exitcode = proc.poll()
 
     return exitcode, mm2_cmd, errs
+
+def split_reads_samfile_cleanup(samfile, samfile_temp):
+    """
+    Clean up SAM file by removing inconsistent split-read alignments.
+        
+    Parameters:
+        samfile (str): Path to the input SAM file
+        samfile_temp (str): Path to the output cleaned SAM file
+        
+    Returns:
+        bool: True if successful
+    """
+    total_chunks = 0
+
+    logging.info(f'Reading split-read alignments from the sam file...')
+
+    df = pd.read_csv(samfile,
+                sep='\t',
+                header=None,
+                usecols=[0, 2],
+                names=['QNAME', 'REF'],
+                dtype={'QNAME': 'str', 'REF': 'str'}
+    )
+
+    df['QNAME_MAIN'] = df['QNAME'].str.split('|').str[0]
+    df['REF_TAXID'] = df['REF'].str.split('|').str[-2]
+
+    logging.info(f'Filtering out inconsistent chunks of reads...')
+    # get the index with the most frequent taxid for each read
+    idxmax = df.assign(_taxid_cnt=df.groupby(["QNAME_MAIN", "REF_TAXID"])["REF_TAXID"].transform("size")) \
+                .loc[lambda x: x["_taxid_cnt"] == x.groupby("QNAME_MAIN")["_taxid_cnt"].transform("max")] \
+                .index
+
+    # Create a set of indices for faster lookup
+    idxmax_set = set(idxmax.values)
+
+    total_chunks = len(df)
+    del idxmax
+    del df
+
+    logging.info(f'Writing qualified hits...')
+    with open(samfile_temp, 'w') as fout, open(samfile, 'r') as fin:
+        for idx, line in enumerate(fin):
+            if not idx%100000:
+                logging.debug(f'Processed {idx} lines...')
+            
+            if idx in idxmax_set:
+                fout.write(line)
+    logging.info(f'Done writing {len(idxmax_set)} hits.')
+
+    return True, total_chunks, len(idxmax_set)
 
 def remove_multiple_hits(samfile, samfile_temp):
     """
@@ -1699,21 +1753,31 @@ def main(args):
         print_message( f"    Input reads        : {[x.name for x in argvs.input]}",     argvs.silent, begin_t, logfile )
     print_message( f"    Input SAM file     : {samfile}",           argvs.silent, begin_t, logfile )
     print_message( f"    Database           : {argvs.database}",    argvs.silent, begin_t, logfile )
-    if argvs.accExclusionList:
-        print_message( f"    Exclude accession  : {argvs.accExclusionList.name}", argvs.silent, begin_t, logfile )
     print_message( f"    Database level     : {argvs.dbLevel}",     argvs.silent, begin_t, logfile )
-    print_message( f"    Mismatch penalty   : {argvs.mismatch}",    argvs.silent, begin_t, logfile )
     print_message( f"    Abundance          : {argvs.relAbu}",      argvs.silent, begin_t, logfile )
     print_message( f"    Output path        : {argvs.outdir}",      argvs.silent, begin_t, logfile )
     print_message( f"    Prefix             : {argvs.prefix}",      argvs.silent, begin_t, logfile )
-    print_message( f"    Extract seqs       : {argvs.extract}",     argvs.silent, begin_t, logfile )
     print_message( f"    Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile )
-    print_message( f"    Minimal SIG cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile ) #SIG_COV
-    print_message( f"    Minimal SIG len    : {argvs.minLen}",      argvs.silent, begin_t, logfile ) #COVERED_SIG_LEN
-    print_message( f"    Minimal reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile )
-    print_message( f"    Minimal mFactor    : {argvs.matchFactor}", argvs.silent, begin_t, logfile )
-    print_message( f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile )
-    print_message( f"    SNI-score (g,s,n)  : {argvs.sniScore}",   argvs.silent, begin_t, logfile )
+    print_message( f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile )
+    if argvs.errorRate >= 0.0:
+        print_message( f"    Read error rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile )
+    if argvs.accExclusionList:
+        print_message( f"    Exclude accession  : {argvs.accExclusionList.name}", argvs.silent, begin_t, logfile )
+    if argvs.extract:
+        print_message( f"    Extract seqs       : {argvs.extract}",     argvs.silent, begin_t, logfile )
+    if argvs.minCov > 0:
+        print_message( f"    Minimal SIG cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile ) #SIG_COV
+    if argvs.minLen > 0:
+        print_message( f"    Minimal SIG len    : {argvs.minLen}",      argvs.silent, begin_t, logfile ) #COVERED_SIG_LEN
+    if argvs.minReads > 0:
+        print_message( f"    Minimal reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile )
+    if argvs.matchFactor > 0:
+        print_message( f"    Minimal mFactor    : {argvs.matchFactor}", argvs.silent, begin_t, logfile )
+    if argvs.maxZscore > 0:
+        print_message( f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile )
+
+    # display the command line
+    logging.info( f"COMMAND: {' '.join(sys.argv)}")
 
     #load taxonomy
     print_message( "Loading taxonomy information...", argvs.silent, begin_t, logfile )
@@ -1757,6 +1821,7 @@ def main(args):
         print_message( f"COMMAND: {cmd}", argvs.silent, begin_t, logfile )
 
         if exitcode != 0:
+            # if size of the samfile is zero
             sys.exit( "[%s] ERROR: error occurred while running read mapping (exit: %s, message: %s).\n" % (time_spend(begin_t), exitcode, msg) )
         else:
             print_message( f"Done mapping reads to {argvs.dbLevel} signature database.", argvs.silent, begin_t, logfile )
@@ -1776,6 +1841,20 @@ def main(args):
             # Note:
             # When input of the gottcha2 is a SAM file and new outdir/prefix is provided, the output will be saved to that location.
             # If not, the output will overwrite the original SAM file.
+        gc.collect()
+
+    # remove inconsistent split-reads for long-reads
+    if argvs.removeIncSplitReads:
+        # remove inconsistent split-reads from the SAM file
+        print_message( "Removing inconsistent split-reads from SAM file...", argvs.silent, begin_t, logfile )
+        samfile_output = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
+        samfile_temp = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
+        flag, tol_chunks_count, tol_chunks_qualified = split_reads_samfile_cleanup(samfile, samfile_temp)
+        if flag:
+            os.rename(samfile_temp, samfile_output)
+            samfile = samfile_output
+        print_message( f" - {tol_chunks_count} mapped read chunks processed", argvs.silent, begin_t, logfile )
+        print_message( f" - {tol_chunks_qualified} qualified hits", argvs.silent, begin_t, logfile )
         gc.collect()
 
     # processing SAM file and generate results
@@ -1798,7 +1877,7 @@ def main(args):
             (sni_score_cutoff, sni_score_species, sni_score_strain) = [float(x) for x in argvs.sniScore.split(',')]
 
             # aggregate the results
-            res_df = aggregate_taxonomy(res, argvs.relAbu, argvs.dbLevel , argvs.minCov, argvs.minReads, argvs.minLen, argvs.maxZscore, sni_score_species, sni_score_strain, sni_score_cutoff)
+            res_df = aggregate_taxonomy(res, argvs.relAbu, argvs.dbLevel , argvs.minCov, argvs.minReads, argvs.minLen, argvs.maxZscore, sni_score_species, sni_score_strain, sni_score_cutoff, argvs.errorRate)
             print_message( "Done taxonomy aggregation.", argvs.silent, begin_t, logfile )
 
             if not len(res_df):
