@@ -1892,7 +1892,7 @@ def main(args):
                 target_idx = (res_df['LEVEL']==argvs.dbLevel) & \
                                 (res_df['NOTE'].str.contains('Filtered out', na=False) == False) & \
                                 (res_df['NOTE'].str.contains('Not shown', na=False) == False)
-                target_df = res_df.loc[target_idx,:]
+                target_df = res_df.loc[target_idx, ['ABUNDANCE','TAXID']]
                 tax_num = len(target_df)
                 if tax_num:
                     generate_lineage_file(target_df, outfile_lineage)
