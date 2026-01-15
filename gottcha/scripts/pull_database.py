@@ -7,7 +7,6 @@ import os
 import tarfile
 from tqdm import *
 import argparse
-import pkg_resources
 import json
 from gottcha import GOTTCHA_DB_LATEST, FILE_NAME
 

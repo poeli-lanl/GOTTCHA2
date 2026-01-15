@@ -19,7 +19,7 @@ GOTTCHAv2 is currently under development in BETA stage. Pre-built databases for 
 
 GOTTCHA2 profiler is written in Python3 and leverage minimap2 to map reads to signature sequences. In order to run GOTTCHA2 correctly, your system requires to have following dependencies installed correctly. The YAML file for Conda environment can be found in `environment.yml`.
 
-- Python 3.6+
+- Python 3.8+
 - minimap2 2.17+
 - pandas
 - samtools
@@ -33,7 +33,9 @@ GOTTCHA2 profiler is written in Python3 and leverage minimap2 to map reads to si
 
         OR
 
-        Download or git clone GOTTCHA2 from this repository and run `pip install .`
+        Download or git clone GOTTCHA2 from this repository and run `python -m pip install .`
+
+        (For development installs: `python -m pip install -e .`)
 
 3. Download the latest version of the GOTTCHA2 database. (This step may take some time)
 
