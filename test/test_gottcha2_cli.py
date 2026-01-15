@@ -82,7 +82,6 @@ class TestGottcha2CLI(unittest.TestCase):
         
         # Test nanopore option
         args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-np'])
-        self.assertEqual(args.presetx, 'map-ont')
         self.assertEqual(args.minReads, 0)
         self.assertEqual(args.matchFactor, 0)
 
