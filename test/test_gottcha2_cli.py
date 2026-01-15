@@ -85,6 +85,10 @@ class TestGottcha2CLI(unittest.TestCase):
         self.assertEqual(args.presetx, 'map-ont')
         self.assertEqual(args.minReads, 0)
         self.assertEqual(args.matchFactor, 0)
+
+        # Test nanopore option with multiple input files
+        with self.assertRaises(SystemExit):
+            gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, self.test_fastq, '-d', self.db_path, '-l', 'species', '-np'])
         
         # Test auto-detection of dbLevel from database name
         db_with_level = os.path.join(self.test_dir, "test_db.species.fna")
@@ -99,7 +103,7 @@ class TestGottcha2CLI(unittest.TestCase):
         
         # Test accession exclusion list
         args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-A', self.exclusion_list])
-        self.assertEqual(args.accExclusionList.name, self.exclusion_list)
+        self.assertEqual(args.accExclusionList, os.path.abspath(self.exclusion_list))
         
         # Test extract option with file
         taxid_file = os.path.join(self.test_dir, "taxids.txt")
