@@ -82,9 +82,12 @@ class TestGottcha2CLI(unittest.TestCase):
         
         # Test nanopore option
         args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-np'])
-        self.assertEqual(args.presetx, 'map-ont')
         self.assertEqual(args.minReads, 0)
         self.assertEqual(args.matchFactor, 0)
+
+        # Test nanopore option with multiple input files
+        with self.assertRaises(SystemExit):
+            gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, self.test_fastq, '-d', self.db_path, '-l', 'species', '-np'])
         
         # Test auto-detection of dbLevel from database name
         db_with_level = os.path.join(self.test_dir, "test_db.species.fna")
@@ -99,7 +102,7 @@ class TestGottcha2CLI(unittest.TestCase):
         
         # Test accession exclusion list
         args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-A', self.exclusion_list])
-        self.assertEqual(args.accExclusionList.name, self.exclusion_list)
+        self.assertEqual(args.accExclusionList, os.path.abspath(self.exclusion_list))
         
         # Test extract option with file
         taxid_file = os.path.join(self.test_dir, "taxids.txt")
@@ -176,8 +179,7 @@ class TestGottcha2CLI(unittest.TestCase):
     
     def test_load_excluded_acc_list(self):
         """Test loading excluded accession list."""
-        with open(self.exclusion_list) as f:
-            excluded_acc = gottcha2.load_excluded_acc_list(f)
+        excluded_acc = gottcha2.load_excluded_acc_list(self.exclusion_list)
             
         self.assertEqual(len(excluded_acc), 2)
         self.assertIn("ABC", excluded_acc)
@@ -188,9 +190,8 @@ class TestGottcha2CLI(unittest.TestCase):
         with open(empty_file, 'w') as f:
             pass
         
-        with open(empty_file) as f:
-            with self.assertLogs(level='WARNING'):
-                empty_set = gottcha2.load_excluded_acc_list(f)
+        with self.assertLogs(level='WARNING'):
+            empty_set = gottcha2.load_excluded_acc_list(empty_file)
                 
         self.assertEqual(len(empty_set), 0)
     

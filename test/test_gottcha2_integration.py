@@ -185,8 +185,7 @@ class TestGottcha2Integration(unittest.TestCase):
             f.write("ABC\nXYZ\nPQR\n")
         
         # Test loading the file
-        with open(acc_file) as f:
-            exclude_set = gottcha2.load_excluded_acc_list(f)
+        exclude_set = gottcha2.load_excluded_acc_list(acc_file)
         
         self.assertEqual(len(exclude_set), 3)
         self.assertIn("ABC", exclude_set)
@@ -198,9 +197,8 @@ class TestGottcha2Integration(unittest.TestCase):
         with open(empty_file, 'w') as f:
             pass
             
-        with open(empty_file) as f:
-            with self.assertLogs(level='WARNING'):
-                empty_set = gottcha2.load_excluded_acc_list(f)
+        with self.assertLogs(level='WARNING'):
+            empty_set = gottcha2.load_excluded_acc_list(empty_file)
                 
         self.assertEqual(len(empty_set), 0)
 
@@ -289,8 +287,7 @@ class TestGottcha2Integration(unittest.TestCase):
         gottcha2.logfile = os.path.join(self.test_dir, "test.log")
         
         # Load exclusion list and run the function
-        with open(acc_file) as f:
-            exclude_set = gottcha2.load_excluded_acc_list(f)
+        exclude_set = gottcha2.load_excluded_acc_list(acc_file)
             
         result, mapped_reads, tol_alignment_count, tol_invalid_match_count, tol_exclude_acc_count = gottcha2.process_sam_file(
             self.sam_file, 1, 0.5, exclude_set

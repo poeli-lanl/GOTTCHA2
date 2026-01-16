@@ -2,7 +2,7 @@
 
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", "Anna Chernikov", "Jason Gans", "Tracey Freites", "Patrick Chain"]
-__version__   = "2.1.12"
+__version__   = "2.2.0"
 __copyright__ = """
 Copyright (2019). Traid National Security, LLC. This material was produced
 under U.S. Government contract DE-AC52-06NA25396 for Los Alamos National Laboratory
@@ -32,13 +32,16 @@ from multiprocessing import Pool, set_start_method
 from itertools import chain
 import math
 import logging
+from types import SimpleNamespace
 
 try:
     # Try relative import first (for package usage)
     from . import taxonomy as gt
+    from . import split_reads
 except ImportError:
     # Fall back to direct import (for script usage)
     import taxonomy as gt
+    import split_reads
 
 def parse_params(ver, args):
     """
@@ -66,10 +69,10 @@ def parse_params(ver, args):
 
     eg = p.add_mutually_exclusive_group( required=True )
 
-    eg.add_argument( '-i','--input', metavar='[FASTQ]', nargs='+', type=ap.FileType('r'),
-                    help="Input one or multiple FASTQ/FASTA file(s). Use space to separate multiple input files.")
+    eg.add_argument( '-i','--input', metavar='[FASTQ]', nargs='+', type=str,
+                    help="Input FASTQ/FASTA file(s). Use space to separate multiple input files.")
 
-    eg.add_argument( '-s','--sam', metavar='[SAMFILE]', nargs=1, type=ap.FileType('r'),
+    eg.add_argument( '-s','--sam', metavar='[SAMFILE]', nargs=1, type=str,
                     help="Specify the input SAM file. Use '-' for standard input. ")
 
     p.add_argument( '-d','--database', metavar='[GOTTCHA2_db]', type=str, default=None,
@@ -83,7 +86,7 @@ def parse_params(ver, args):
                     help="""Specify the path to the taxonomy information directory or file. The program will attempt to locate a matching .tax.tsv file for the specified database. If it cannot find one, it will use the ‘taxonomy_db’ directory located in the same directory as the executable by default.""")
 
     p.add_argument( '-np','--nanopore', action="store_true",
-                    help="Adjust options for Nanopore reads. It will overwrite the other options to '-xm map-ont -mr 1 -mf 0 -mz 0'.")
+                    help="Indicate that the input reads are from Oxford Nanopore sequencing platform. This option enables read splitting and error rate set to 0.03 if not specified.")
 
     p.add_argument( '-pm','--mismatch', metavar='<INT>', type=int, default=10,
                     help="Mismatch penalty for the aligner. [default: 10] (deprecated)")
@@ -155,18 +158,15 @@ def parse_params(ver, args):
                     help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
 
     p.add_argument( '-nc','--noCutoff', action="store_true",
-                    help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -A 0,0]")
+                    help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -ss 0,0,0]")
 
-    p.add_argument( '-A','--accExclusionList', metavar='[FILE]', required=False, type=ap.FileType('r'),
+    p.add_argument( '-A','--accExclusionList', metavar='[FILE]', required=False, type=str,
                     help="List of excluded accessions from the database (e.g. plasmid accessions).")
 
     p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
                     help="The multiple hit removal step is automatically enabled for sequence input files and disabled for SAM files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
 
-    p.add_argument( '-rs','--removeIncSplitReads', action="store_true",
-                    help="Remove inconsistent split-reads from the SAM file. This option is only applicable for long-read data.")
-
-    p.add_argument( '-er','--errorRate', metavar='<FLOAT>', type=float, default=0.005,
+    p.add_argument( '-er','--errorRate', metavar='<FLOAT>', type=float,
                     help="Estimated error rate for sequencing data. [default: 0.005]")
 
     p.add_argument( '-c','--stdout', action="store_true",
@@ -218,6 +218,31 @@ def parse_params(ver, args):
         if not os.path.isfile( args_parsed.database + ".mmi" ):
             p.error( 'Database index %s.mmi not found.' % args_parsed.database )
 
+    if args_parsed.input:
+        validated_inputs = []
+        for path in args_parsed.input:
+            if path == '-':
+                p.error('--input does not support reading from stdin ("-"). Please provide a file path.')
+            if not os.path.isfile(path):
+                p.error(f'Input file {path} not found.')
+            validated_inputs.append(SimpleNamespace(name=os.path.abspath(path)))
+        args_parsed.input = validated_inputs
+
+    if args_parsed.sam:
+        sam_path = args_parsed.sam[0]
+        if sam_path != '-' and not os.path.isfile(sam_path):
+            p.error(f'SAM file {sam_path} not found.')
+        sam_path_name = sam_path if sam_path == '-' else os.path.abspath(sam_path)
+        args_parsed.sam = [SimpleNamespace(name=sam_path_name)]
+
+    if args_parsed.accExclusionList:
+        if not os.path.isfile(args_parsed.accExclusionList):
+            p.error(f'Accession exclusion list {args_parsed.accExclusionList} not found.')
+        args_parsed.accExclusionList = os.path.abspath(args_parsed.accExclusionList)
+
+    if args_parsed.nanopore and args_parsed.input and len(args_parsed.input) != 1:
+        p.error( '--nanopore option requires a single input read file.' )
+
     if not args_parsed.prefix:
         if args_parsed.input:
             name = search(r'([^\/\.]+)\..*$', args_parsed.input[0].name )
@@ -256,21 +281,16 @@ def parse_params(ver, args):
         args_parsed.extract = 'all:20:fasta'
 
     if args_parsed.noCutoff:
-        args_parsed.minCov = 0
-        args_parsed.minReads = 0
-        args_parsed.minLen = 0
-        args_parsed.matchFactor = 0
-        args_parsed.maxZscore = 0
         args_parsed.sniScore = '0,0,0'
-
-    if args_parsed.nanopore:
-        args_parsed.presetx = 'map-ont'
-        args_parsed.minReads = 0
-        args_parsed.matchFactor = 0
-        args_parsed.maxZscore = 0
 
     if args_parsed.m2options == 'auto':
         args_parsed.m2options = '-s60'
+
+    if not args_parsed.errorRate:
+        if args_parsed.nanopore:
+            args_parsed.errorRate = 0.03
+        else:
+            args_parsed.errorRate = 0.005
 
     return args_parsed
 
@@ -1347,7 +1367,40 @@ def readMapping(reads, db, threads, mm_options, presetx, samfile, logfile):
 
     return exitcode, mm2_cmd, errs
 
-def split_reads_samfile_cleanup(samfile, samfile_temp):
+def preprocess_nanopore_reads(reads, outdir, prefix, silent):
+    """
+    Split nanopore reads into shorter chunks before mapping.
+    
+    Parameters:
+        reads (list): List of input read file objects (expects exactly one)
+        outdir (str): Output directory for temporary files
+        prefix (str): Prefix for the generated chunk file
+        silent (bool): Silence flag for logging
+    
+    Returns:
+        list: Updated list of read objects pointing to the chunked read file
+    """
+    os.makedirs(outdir, exist_ok=True)
+
+    if len(reads) != 1:
+        print_message("ERROR: Nanopore read processing expects a single input file.", silent, begin_t, logfile, errorout=1)
+
+    input_path = reads[0].name
+    output_path = os.path.join(outdir, f"{prefix}.split_reads.fasta.gz")
+
+    print_message("Splitting nanopore reads into chunks...", silent, begin_t, logfile)
+    try:
+        chunk_count = split_reads.split_to_fasta(input_path, output_path)
+    except Exception as e:
+        print_message(f"ERROR: Failed to split nanopore reads: {e}", silent, begin_t, logfile, errorout=1)
+    else:
+        if chunk_count == 0:
+            print_message("ERROR: No reads were produced after splitting nanopore reads.", silent, begin_t, logfile, errorout=1)
+        print_message(f" - {chunk_count} chunks written to {output_path}", silent, begin_t, logfile)
+
+    return [SimpleNamespace(name=output_path)]
+
+def split_reads_samfile_postprocessing(samfile, samfile_temp):
     """
     Clean up SAM file by removing inconsistent split-read alignments.
         
@@ -1461,7 +1514,7 @@ def remove_multiple_hits(samfile, samfile_temp):
 
         return True
 
-def load_excluded_acc_list(f):
+def load_excluded_acc_list(filepath):
     """
     Load a list of accession numbers to exclude from processing.
     
@@ -1469,16 +1522,16 @@ def load_excluded_acc_list(f):
     as a set for efficient lookup during processing. Empty lines are ignored.
     
     Parameters:
-        f (file): File object containing accession numbers to exclude
+        filepath (str): Path to the file containing accession numbers to exclude
         
     Returns:
         set: Set of accession numbers to exclude. Returns empty set if input file is empty.
         
     Example:
-        with open('exclude.txt') as f:
-            exclude_list = load_excluded_acc_list(f)
+        exclude_list = load_excluded_acc_list('exclude.txt')
     """
-    excluded_acc_list = f.read().splitlines()
+    with open(filepath) as f:
+        excluded_acc_list = f.read().splitlines()
 
     if len(excluded_acc_list) == 0:
         logging.warning(f"Exclude accession list is empty.")
@@ -1714,8 +1767,8 @@ def main(args):
     )
 
     #dependency check
-    if sys.version_info < (3,6):
-        sys.exit("[ERROR] Python 3.6 or above is required.")
+    if sys.version_info < (3,8):
+        sys.exit("[ERROR] Python 3.8 or above is required.")
     
     dependency_check("minimap2")
     # dependency_check("gawk")
@@ -1759,10 +1812,12 @@ def main(args):
     print_message( f"    Prefix             : {argvs.prefix}",      argvs.silent, begin_t, logfile )
     print_message( f"    Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile )
     print_message( f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile )
+    if argvs.nanopore:
+        print_message( f"    Nanopore mode      : Enabled",              argvs.silent, begin_t, logfile )
     if argvs.errorRate >= 0.0:
         print_message( f"    Read error rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile )
     if argvs.accExclusionList:
-        print_message( f"    Exclude accession  : {argvs.accExclusionList.name}", argvs.silent, begin_t, logfile )
+        print_message( f"    Exclude accession  : {argvs.accExclusionList}", argvs.silent, begin_t, logfile )
     if argvs.extract:
         print_message( f"    Extract seqs       : {argvs.extract}",     argvs.silent, begin_t, logfile )
     if argvs.minCov > 0:
@@ -1814,6 +1869,11 @@ def main(args):
 
     #main process
     if argvs.input:
+        # if nanopore option is on, preprocessing reads
+        if argvs.nanopore:
+            print_message( "Checking nanopore read files...", argvs.silent, begin_t, logfile )
+            argvs.input = preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
+
         print_message( "Running read-mapping...", argvs.silent, begin_t, logfile )
         exitcode, cmd, msg = readMapping( argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
         gc.collect()
@@ -1843,18 +1903,18 @@ def main(args):
             # If not, the output will overwrite the original SAM file.
         gc.collect()
 
-    # remove inconsistent split-reads for long-reads
-    if argvs.removeIncSplitReads:
-        # remove inconsistent split-reads from the SAM file
-        print_message( "Removing inconsistent split-reads from SAM file...", argvs.silent, begin_t, logfile )
+    # preprocess SAM file for nanopore reads
+    if argvs.nanopore:
+        # remove inconsistent read chunks from the SAM file
+        print_message( "Removing inconsistent read chunks from SAM file...", argvs.silent, begin_t, logfile )
         samfile_output = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
         samfile_temp = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
-        flag, tol_chunks_count, tol_chunks_qualified = split_reads_samfile_cleanup(samfile, samfile_temp)
+        flag, tol_chunks_count, tol_chunks_qualified = split_reads_samfile_postprocessing(samfile, samfile_temp)
         if flag:
             os.rename(samfile_temp, samfile_output)
             samfile = samfile_output
         print_message( f" - {tol_chunks_count} mapped read chunks processed", argvs.silent, begin_t, logfile )
-        print_message( f" - {tol_chunks_qualified} qualified hits", argvs.silent, begin_t, logfile )
+        print_message( f" - {tol_chunks_count-tol_chunks_qualified} inconsistent hits removed", argvs.silent, begin_t, logfile )
         gc.collect()
 
     # processing SAM file and generate results
