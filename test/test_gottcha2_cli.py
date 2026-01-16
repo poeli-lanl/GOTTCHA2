@@ -179,8 +179,7 @@ class TestGottcha2CLI(unittest.TestCase):
     
     def test_load_excluded_acc_list(self):
         """Test loading excluded accession list."""
-        with open(self.exclusion_list) as f:
-            excluded_acc = gottcha2.load_excluded_acc_list(f)
+        excluded_acc = gottcha2.load_excluded_acc_list(self.exclusion_list)
             
         self.assertEqual(len(excluded_acc), 2)
         self.assertIn("ABC", excluded_acc)
@@ -191,9 +190,8 @@ class TestGottcha2CLI(unittest.TestCase):
         with open(empty_file, 'w') as f:
             pass
         
-        with open(empty_file) as f:
-            with self.assertLogs(level='WARNING'):
-                empty_set = gottcha2.load_excluded_acc_list(f)
+        with self.assertLogs(level='WARNING'):
+            empty_set = gottcha2.load_excluded_acc_list(empty_file)
                 
         self.assertEqual(len(empty_set), 0)
     
