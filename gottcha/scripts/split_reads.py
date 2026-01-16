@@ -72,7 +72,7 @@ def write_chunks_fasta(out, rid: bytes, seq: bytes, L: int, step: int, drop_tail
     return chunks_written
 
 def split_to_fasta(input_path: str, output_path: str, length: int = 150, step: Optional[int] = None,
-               drop_tail: bool = False, min_tail: int = 1, prefix: str = "", gzip_level: int = 1) -> int:
+               drop_tail: bool = True, min_tail: int = 1, prefix: str = "", gzip_level: int = 1) -> int:
     """
     Split long reads from input_path into fixed-length chunks and write to output_path.
 

@@ -1957,9 +1957,9 @@ def main(args):
                 if tax_num:
                     generate_lineage_file(target_df, outfile_lineage)
 
-                if argvs.mpa:
-                    generate_mpa_file(target_df, outfile_mpa)
-                    print_message( f"MPA format file saved to {outfile_mpa}.", argvs.silent, begin_t, logfile )
+                    if argvs.mpa:
+                        generate_mpa_file(target_df, outfile_mpa)
+                        print_message( f"MPA format file saved to {outfile_mpa}.", argvs.silent, begin_t, logfile )
 
                 print_message( f"{tax_num} qualified {argvs.dbLevel} profiled; Results saved to {outfile}.", argvs.silent, begin_t, logfile )
         else:
