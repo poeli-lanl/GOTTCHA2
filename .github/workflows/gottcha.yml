@@ -56,6 +56,12 @@ jobs:
           gottcha2 profile -d gottcha2_database_test/gottcha_db.species.fna -s SRR12689945_1_1k.gottcha_species.sam
           grep 'Orthoebolavirus zairense' SRR12689945_1_1k.tsv
 
+      - name: Run testing dataset - ONT profile tests
+        run: |
+          cd GOTTCHA2/test/
+          gottcha2 profile -d gottcha2_database_test/gottcha_db.species.fna -i SRR2016557_extract.fasta.gz -np
+          grep 'Orthoebolavirus zairense' SRR2016557_extract.tsv
+
       - name: Test extract functionality - Simple extraction
         run: |
           cd GOTTCHA2/test/

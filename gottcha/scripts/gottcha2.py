@@ -86,7 +86,7 @@ def parse_params(ver, args):
                     help="""Specify the path to the taxonomy information directory or file. The program will attempt to locate a matching .tax.tsv file for the specified database. If it cannot find one, it will use the ‘taxonomy_db’ directory located in the same directory as the executable by default.""")
 
     p.add_argument( '-np','--nanopore', action="store_true",
-                    help="Adjust options for Nanopore reads. It will overwrite the other options to '-xm map-ont -mr 1 -mf 0 -mz 0'.")
+                    help="Indicate that the input reads are from Oxford Nanopore sequencing platform. This option enables read splitting and error rate set to 0.03 if not specified.")
 
     p.add_argument( '-pm','--mismatch', metavar='<INT>', type=int, default=10,
                     help="Mismatch penalty for the aligner. [default: 10] (deprecated)")
@@ -158,7 +158,7 @@ def parse_params(ver, args):
                     help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
 
     p.add_argument( '-nc','--noCutoff', action="store_true",
-                    help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -A 0,0]")
+                    help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -ss 0,0,0]")
 
     p.add_argument( '-A','--accExclusionList', metavar='[FILE]', required=False, type=str,
                     help="List of excluded accessions from the database (e.g. plasmid accessions).")
@@ -166,10 +166,7 @@ def parse_params(ver, args):
     p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
                     help="The multiple hit removal step is automatically enabled for sequence input files and disabled for SAM files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
 
-    p.add_argument( '-rs','--removeIncSplitReads', action="store_true",
-                    help="Remove inconsistent split-reads from the SAM file. This option is only applicable for long-read data.")
-
-    p.add_argument( '-er','--errorRate', metavar='<FLOAT>', type=float, default=0.005,
+    p.add_argument( '-er','--errorRate', metavar='<FLOAT>', type=float,
                     help="Estimated error rate for sequencing data. [default: 0.005]")
 
     p.add_argument( '-c','--stdout', action="store_true",
@@ -288,6 +285,12 @@ def parse_params(ver, args):
 
     if args_parsed.m2options == 'auto':
         args_parsed.m2options = '-s60'
+
+    if not args_parsed.errorRate:
+        if args_parsed.nanopore:
+            args_parsed.errorRate = 0.03
+        else:
+            args_parsed.errorRate = 0.005
 
     return args_parsed
 
@@ -1383,7 +1386,7 @@ def preprocess_nanopore_reads(reads, outdir, prefix, silent):
         print_message("ERROR: Nanopore read processing expects a single input file.", silent, begin_t, logfile, errorout=1)
 
     input_path = reads[0].name
-    output_path = os.path.join(outdir, f"{prefix}.split_reads.fasta")
+    output_path = os.path.join(outdir, f"{prefix}.split_reads.fasta.gz")
 
     print_message("Splitting nanopore reads into chunks...", silent, begin_t, logfile)
     try:
@@ -1809,6 +1812,8 @@ def main(args):
     print_message( f"    Prefix             : {argvs.prefix}",      argvs.silent, begin_t, logfile )
     print_message( f"    Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile )
     print_message( f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile )
+    if argvs.nanopore:
+        print_message( f"    Nanopore mode      : Enabled",              argvs.silent, begin_t, logfile )
     if argvs.errorRate >= 0.0:
         print_message( f"    Read error rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile )
     if argvs.accExclusionList:
