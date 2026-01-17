@@ -1390,7 +1390,7 @@ def preprocess_nanopore_reads(reads, outdir, prefix, silent):
 
     print_message("Splitting nanopore reads into chunks...", silent, begin_t, logfile)
     try:
-        chunk_count = split_reads.split_to_fasta(input_path, output_path)
+        chunk_count = split_reads.split_to_fasta(input_path, output_path, split_length=150, step_length=150, drop_tail=True)
     except Exception as e:
         print_message(f"ERROR: Failed to split nanopore reads: {e}", silent, begin_t, logfile, errorout=1)
     else:
@@ -1800,6 +1800,9 @@ def main(args):
 
         out_fp = open(outfile, 'w')
 
+    # display the command line
+    logging.info( ' '.join(sys.argv) )
+
     print_message( f"GOTTCHA (v{__version__})", argvs.silent, begin_t, logfile )
     print_message( f"Arguments and dependencies checked:", argvs.silent, begin_t, logfile )
     if argvs.input:
@@ -1821,18 +1824,15 @@ def main(args):
     if argvs.extract:
         print_message( f"    Extract seqs       : {argvs.extract}",     argvs.silent, begin_t, logfile )
     if argvs.minCov > 0:
-        print_message( f"    Minimal SIG cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile ) #SIG_COV
+        print_message( f"    Minimal SIG cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile )
     if argvs.minLen > 0:
-        print_message( f"    Minimal SIG len    : {argvs.minLen}",      argvs.silent, begin_t, logfile ) #COVERED_SIG_LEN
+        print_message( f"    Minimal SIG length : {argvs.minLen}",      argvs.silent, begin_t, logfile )
     if argvs.minReads > 0:
         print_message( f"    Minimal reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile )
     if argvs.matchFactor > 0:
         print_message( f"    Minimal mFactor    : {argvs.matchFactor}", argvs.silent, begin_t, logfile )
     if argvs.maxZscore > 0:
         print_message( f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile )
-
-    # display the command line
-    logging.info( f"COMMAND: {' '.join(sys.argv)}")
 
     #load taxonomy
     print_message( "Loading taxonomy information...", argvs.silent, begin_t, logfile )
@@ -1954,14 +1954,18 @@ def main(args):
                                 (res_df['NOTE'].str.contains('Not shown', na=False) == False)
                 target_df = res_df.loc[target_idx, ['ABUNDANCE','TAXID']]
                 tax_num = len(target_df)
+
+                print_message( f"{tax_num} qualified {argvs.dbLevel} profiled.", argvs.silent, begin_t, logfile )
+
                 if tax_num:
                     generate_lineage_file(target_df, outfile_lineage)
 
                     if argvs.mpa:
+                        target_df = res_df.loc[target_idx, ['TAXID', 'REL_ABUNDANCE', 'READ_COUNT', 'SIG_COV']]
                         generate_mpa_file(target_df, outfile_mpa)
                         print_message( f"MPA format file saved to {outfile_mpa}.", argvs.silent, begin_t, logfile )
 
-                print_message( f"{tax_num} qualified {argvs.dbLevel} profiled; Results saved to {outfile}.", argvs.silent, begin_t, logfile )
+                print_message( f"Results saved to {outfile}.", argvs.silent, begin_t, logfile )
         else:
             print_message( "GOTTCHA2 stopped.", argvs.silent, begin_t, logfile)
             sys.exit(0)
