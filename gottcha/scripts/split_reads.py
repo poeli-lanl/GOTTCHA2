@@ -71,20 +71,19 @@ def write_chunks_fasta(out, rid: bytes, seq: bytes, L: int, step: int, drop_tail
     out.writelines(out_lines)
     return chunks_written
 
-def split_to_fasta(input_path: str, output_path: str, length: int = 150, step: Optional[int] = None,
-               drop_tail: bool = True, min_tail: int = 1, prefix: str = "", gzip_level: int = 1) -> int:
+def split_to_fasta(input_path: str, 
+                   output_path: str, 
+                   split_length: int, 
+                   step_length: int,
+                   drop_tail: bool, 
+                   min_tail: int = 1,
+                   prefix: str = "", 
+                   gzip_level: int = 1) -> int:
     """
     Split long reads from input_path into fixed-length chunks and write to output_path.
 
     Returns the total number of chunks written.
     """
-    L = length
-    step_val = step if step is not None else L
-    if L <= 0 or step_val <= 0:
-        raise ValueError("--length and --step must be positive")
-    if not (1 <= gzip_level <= 9):
-        raise ValueError("--gzip-level must be 1..9")
-
     prefix_b = prefix.encode()
     chunk_count = 0
 
@@ -108,7 +107,7 @@ def split_to_fasta(input_path: str, output_path: str, length: int = 150, step: O
                 # read id up to first whitespace
                 rid = header[1:].strip().split(None, 1)[0]
                 seq = seq.strip()
-                chunk_count += write_chunks_fasta(hout, rid, seq, L, step_val, drop_tail, min_tail, prefix_b)
+                chunk_count += write_chunks_fasta(hout, rid, seq, split_length, step_length, drop_tail, min_tail, prefix_b)
                 header = hin.readline()
 
         else:
@@ -120,7 +119,7 @@ def split_to_fasta(input_path: str, output_path: str, length: int = 150, step: O
                 if header.startswith(b">"):
                     if rid is not None:
                         seq = b"".join(seq_parts)
-                        chunk_count += write_chunks_fasta(hout, rid, seq, L, step_val, drop_tail, min_tail, prefix_b)
+                        chunk_count += write_chunks_fasta(hout, rid, seq, split_length, step_length, drop_tail, min_tail, prefix_b)
                     rid = header[1:].strip().split(None, 1)[0]
                     seq_parts = []
                 else:
@@ -132,7 +131,7 @@ def split_to_fasta(input_path: str, output_path: str, length: int = 150, step: O
 
             if rid is not None:
                 seq = b"".join(seq_parts)
-                chunk_count += write_chunks_fasta(hout, rid, seq, L, step_val, drop_tail, min_tail, prefix_b)
+                chunk_count += write_chunks_fasta(hout, rid, seq, split_length, step_length, drop_tail, min_tail, prefix_b)
 
     return chunk_count
 
@@ -141,18 +140,25 @@ def main():
     ap.add_argument("-i", "--input", required=True, help="Input FASTA/FASTQ (.gz ok) or '-'")
     ap.add_argument("-o", "--output", required=True, help="Output FASTA (.gz ok) or '-'")
     ap.add_argument("-l", "--length", type=int, default=150, help="Chunk length (bp), default 150")
-    ap.add_argument("--step", type=int, default=None, help="Step between chunk starts (default = length, no overlap)")
+    ap.add_argument("--step", type=int, help="Step between chunk starts (default = length, no overlap)")
     ap.add_argument("--drop-tail", action="store_true", help="Drop final shorter tail chunk")
     ap.add_argument("--min-tail", type=int, default=1, help="If keeping tail, minimum tail length to emit (default 1)")
     ap.add_argument("--prefix", default="", help="Prefix added to read IDs (optional)")
     ap.add_argument("--gzip-level", type=int, default=1, help="Gzip compression level for .gz output (1 fastest, 9 smallest). Default 1")
     args = ap.parse_args()
 
+    L = args.length
+    step_length = args.step if args.step is not None else L
+    if L <= 0 or step_length <= 0:
+        raise ValueError("--length and --step must be positive")
+    if not (1 <= args.gzip_level <= 9):
+        raise ValueError("--gzip-level must be 1..9")
+
     split_to_fasta(
         input_path=args.input,
         output_path=args.output,
-        length=args.length,
-        step=args.step,
+        split_length=L,
+        step_length=step_length,
         drop_tail=args.drop_tail,
         min_tail=args.min_tail,
         prefix=args.prefix,
