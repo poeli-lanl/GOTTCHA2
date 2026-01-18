@@ -1412,18 +1412,13 @@ def split_reads_samfile_postprocessing(samfile, samfile_temp):
     df['QNAME_MAIN'] = df['QNAME'].str.split('|').str[0]
     df['REF_TAXID'] = df['REF'].str.split('|').str[-2]
 
-    logging.info(f'sam file: {df}')
-
     logging.info(f'Filtering out inconsistent chunks of reads...')
     # get the index with the most frequent taxid for each read
     idxmax = df.assign(_taxid_cnt=df.groupby(["QNAME_MAIN", "REF_TAXID"])["REF_TAXID"].transform("size")) \
                 .loc[lambda x: x["_taxid_cnt"] == x.groupby("QNAME_MAIN")["_taxid_cnt"].transform("max")] \
                 .index
-
     # Create a set of indices for faster lookup
     idxmax_set = set(idxmax.values)
-
-    logging.info(f'consistent chunks: {idxmax}')
 
     # in the idxmax, get the index of the first occurrence of the chunk (QNAME_MAIN) for each read
     idx1st = df.loc[idxmax].drop_duplicates(subset="QNAME_MAIN", keep="first").index
@@ -2002,4 +1997,3 @@ def main(args):
 
 if __name__ == '__main__':
     main(sys.argv[1:])
-    
