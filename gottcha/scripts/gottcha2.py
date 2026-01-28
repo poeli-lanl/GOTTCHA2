@@ -3,24 +3,6 @@
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", "Anna Chernikov", "Jason Gans", "Tracey Freites", "Patrick Chain"]
 __version__   = "2.2.0"
-__copyright__ = """
-Copyright (2019). Traid National Security, LLC. This material was produced
-under U.S. Government contract DE-AC52-06NA25396 for Los Alamos National Laboratory
-(LANL), which is operated by Los Alamos National Security, LLC for the U.S.
-Department of Energy. The U.S. Government has rights to use, reproduce, and
-distribute this software.  NEITHER THE GOVERNMENT NOR LOS ALAMOS NATIONAL SECURITY,
-LLC MAKES ANY WARRANTY, EXPRESS OR IMPLIED, OR ASSUMES ANY LIABILITY FOR THE
-USE OF THIS SOFTWARE.  If software is modified to produce derivative works, such
-modified software should be clearly marked, so as not to confuse it with the
-version available from LANL.
-
-Additionally, this program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by the Free
-Software Foundation; either version 3 of the License, or (at your option) any
-later version. Accordingly, this program is distributed in the hope that it will
-be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
-"""
 
 import argparse as ap
 import sys, os, time, subprocess
@@ -350,7 +332,7 @@ def merge_ranges(ranges):
                 merged.append(current)
     return merged
 
-def worker(filename, chunkStart, chunkSize, matchFactor, excluded_acc_list=None):
+def worker(filename, chunkStart, chunkSize, matchFactor, split_read_flag=False, excluded_acc_list=None):
     """
     Process a chunk of a SAM file to extract mapping information.
     
@@ -363,6 +345,7 @@ def worker(filename, chunkStart, chunkSize, matchFactor, excluded_acc_list=None)
         chunkStart (int): Byte position in the file where to start reading
         chunkSize (int): Number of bytes to read from the start position
         matchFactor (float): Minimum fraction required for a valid match
+        split_read_flag (bool): Flag indicating whether to split reads (optional)
         excluded_acc_list (set): Set of accession# to exclude from processing (optional)
         
     Returns:
@@ -380,7 +363,7 @@ def worker(filename, chunkStart, chunkSize, matchFactor, excluded_acc_list=None)
     exclude_acc_count=0
 
     for line in lines:
-        k, r, nm, nid, rd, rs, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, valid_acc_flag = parse(line, matchFactor, excluded_acc_list)
+        k, r, nm, nid, rd, rs, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, valid_acc_flag, sr_chunk_flag = parse(line, matchFactor, excluded_acc_list)
         # parsed values from SAM line
         # only k, r, n, pri_aln_flag, valid_flag are used
         # k: reference name
@@ -391,6 +374,7 @@ def worker(filename, chunkStart, chunkSize, matchFactor, excluded_acc_list=None)
         # pri_aln_flag: whether this is a primary alignment
         # valid_match_flag: whether this alignment meets match criteria
         # valid_acc_flag: whether this alignment maps to a valid accession
+        # sr_chunk_flag: whether this is a chunked read
 
         if not valid_match_flag:
             invalid_match_count += 1
@@ -402,7 +386,7 @@ def worker(filename, chunkStart, chunkSize, matchFactor, excluded_acc_list=None)
             if k in res:
                 res[k]['REGIONS'] = merge_ranges(res[k]['REGIONS']+[r])
                 res[k]["MB"] += r[1] - r[0] + 1
-                res[k]["MR"] += 1
+                res[k]["MR"] += 0 if split_read_flag and (not sr_chunk_flag) else 1
                 res[k]["NM"] += nm
                 res[k]["ID"] += nid
                 res[k]["RL"] += read_len
@@ -410,7 +394,7 @@ def worker(filename, chunkStart, chunkSize, matchFactor, excluded_acc_list=None)
                 res[k]={}
                 res[k]["REGIONS"] = [r]
                 res[k]["MB"] = r[1] - r[0] + 1
-                res[k]["MR"] = 1
+                res[k]["MR"] = 0 if split_read_flag and (not sr_chunk_flag) else 1
                 res[k]["NM"] = nm
                 res[k]["ID"] = nid
                 res[k]["RL"] = read_len
@@ -453,9 +437,18 @@ def parse(line, matchFactor, excluded_acc_list=None):
     temp = line.split('\t')
     name = temp[0]
     cigr = temp[5]
+    mapped_len = 0
+
+    # parse NM tag for mismatch length
+    mismatch_len = search(r'NM:i:(\d+)', line)
+    mismatch_len = int(mismatch_len.group(1)) if mismatch_len else 0
 
     # parse the CIGAR string for match length, search all r'(\d+)M' and sum all matches
-    mapped_len = sum(int(num) for num in findall(r'(\d+)M', cigr))
+    if "M" in cigr:
+        mapped_len = sum(int(num) for num in findall(r'(\d+)M', cigr))
+    else:
+        mapped_len = sum(int(num) for num in findall(r'(\d+)=', cigr))
+        mapped_len += mismatch_len
 
     # count for deletion and insertion length
     ins_len = 0
@@ -466,11 +459,11 @@ def parse(line, matchFactor, excluded_acc_list=None):
         del_len = sum(int(num) for num in findall(r'(\d+)D', cigr)) if 'D' in cigr else 0
     indel_len = ins_len + del_len
 
-    mismatch_len = search(r'NM:i:(\d+)', line)
-    mismatch_len = int(mismatch_len.group(1)) if mismatch_len else 0
     start = int(temp[3])
     end   = start + mapped_len + del_len - 1
     read_len = len(temp[9])
+    # determine if this is a first seen chunked read
+    sr_chunk_flag = True if line.endswith('ZC:i:1') else False
 
     ref = temp[2].rstrip('|')
     ref = ref[: -2 if ref.endswith(".0") else None ]
@@ -499,7 +492,7 @@ def parse(line, matchFactor, excluded_acc_list=None):
     if excluded_acc_list:
         valid_acc_flag = False if acc in excluded_acc_list else True
 
-    return ref, (start, end), mismatch_len, indel_len, name, temp[9], temp[10], temp[1], temp[5], read_len, primary_alignment_flag, valid_match_flag, valid_acc_flag
+    return ref, (start, end), mismatch_len, indel_len, name, temp[9], temp[10], temp[1], temp[5], read_len, primary_alignment_flag, valid_match_flag, valid_acc_flag, sr_chunk_flag
 
 def time_spend(start):
     """
@@ -555,7 +548,7 @@ def chunkify(fname, size=1*1024*1024):
             if chunkEnd > fileEnd:
                 break
 
-def process_sam_file(sam_fn, numthreads, matchFactor, excluded_acc_list=None):
+def process_sam_file(sam_fn, numthreads, matchFactor, split_read_flag=False, excluded_acc_list=None):
     """
     Process a SAM file using parallel execution to extract mapping information.
     
@@ -566,7 +559,7 @@ def process_sam_file(sam_fn, numthreads, matchFactor, excluded_acc_list=None):
         sam_fn (str): Path to the SAM file
         numthreads (int): Number of parallel processes to use
         matchFactor (float): Minimum fraction required for a valid match
-        excluded_acc_list (set): Set of accession# to exclude from processing (optional)
+        split_read_flag (bool): Flag indicating whether to split reads (optional)
         
     Returns:
         tuple: (
@@ -589,7 +582,7 @@ def process_sam_file(sam_fn, numthreads, matchFactor, excluded_acc_list=None):
     tol_alignment_count = 0
 
     for chunkStart,chunkSize in chunkify(sam_fn):
-        jobs.append( pool.apply_async(worker, (sam_fn,chunkStart,chunkSize,matchFactor,excluded_acc_list)) )
+        jobs.append( pool.apply_async(worker, (sam_fn,chunkStart,chunkSize,matchFactor,split_read_flag,excluded_acc_list)) )
 
     #wait for all jobs to finish
     tol_jobs = len(jobs)
@@ -767,7 +760,7 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
         processed_lines += 1
         
         try:
-            ref, region, nm, nid, rname, rseq, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, valid_acc_flag = parse(line, matchFactor, excluded_acc_list)
+            ref, region, nm, nid, rname, rseq, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, valid_acc_flag, sr_chunk_flag = parse(line, matchFactor, excluded_acc_list)
             
             if not (pri_aln_flag and valid_match_flag and valid_acc_flag):
                 continue
@@ -1213,11 +1206,11 @@ def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
 
     # Fields for full mode
     cols = ['LEVEL', 'NAME', 'TAXID', 'READ_COUNT', 'TOTAL_BP_MAPPED',
-            'SNI_SCORE', 'COVERED_SIG_LEN', 'BEST_SIG_COV', 'DEPTH', 'REL_ABUNDANCE', # summary
+            'SNI_SCORE', 'COVERED_SIG_LEN', 'BEST_SIG_COV', 'DEPTH', 'REL_ABUNDANCE_GC', 'REL_ABUNDANCE', # summary
             'PARENT_NAME', 'PARENT_TAXID', # parants
             'TOTAL_READ_LEN', 'READ_IDT', 'TOTAL_BP_MISMATCH', 'TOTAL_BP_INDEL', 'SNI_NAIVE', 'SNI_CI95_LH', # read stats
             'SIG_COV', 'MAPPED_SIG_LEN', 'TOTAL_SIG_LEN', 'COVERED_SIG_DEPTH', 'COVERED_MAPPED_SIG_COV', 'ZSCORE', # signature stats
-            'GENOMIC_CONTENT_EST', 'ABUNDANCE', 'REL_ABUNDANCE_DEPTH', 'REL_ABUNDANCE_GC', # abundance
+            'GENOMIC_CONTENT_EST', 'ABUNDANCE', 'REL_ABUNDANCE_DEPTH', # abundance
             'SIG_LEVEL', 'GENOME_COUNT', 'GENOME_SIZE', 'NOTE' # ref genome
             ]
 
@@ -1229,7 +1222,7 @@ def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
 
     # get qualified taxa
     non_qualified_idx = rep_df['NOTE'].str.contains('Filtered out', na=False) | rep_df['NOTE'].str.contains('Not shown', na=False) 
-    qualified_df = rep_df.loc[~non_qualified_idx, cols[:10]]
+    qualified_df = rep_df.loc[~non_qualified_idx, cols[:11]]  # first 11 columns are summary
 
     sep = ',' if fmt=='csv' else '\t'
     
@@ -1316,7 +1309,7 @@ def generate_mpa_file(target_df, o):
     """
 
     lineage_df = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, all_major_rank=True, print_strain=False, space2underscore=True, sep=";"))
-    result = pd.concat([target_df[['TAXID', 'REL_ABUNDANCE', 'READ_COUNT', 'SIG_COV']], lineage_df], axis=1, sort=False)
+    result = pd.concat([target_df[['TAXID', 'REL_ABUNDANCE', 'REL_ABUNDANCE_GC', 'READ_COUNT', 'SIG_COV']], lineage_df], axis=1, sort=False)
     result.to_csv(o, index=False, header=True, sep='\t', float_format='%.4f')
 
     return True
@@ -1349,10 +1342,10 @@ def readMapping(reads, db, threads, mm_options, presetx, samfile, logfile):
     input_file = " ".join([x.name for x in reads])
 
     # Minimap2 options for short reads: the options here is essentailly the -x 'sr' equivalent with some modifications on scoring
-    sr_opts = f"-x sr {mm_options} -a -N20 --MD --secondary=no --sam-hit-only"
+    sr_opts = f"-x sr {mm_options} -a -N20 --eqx --secondary=no --sam-hit-only"
     
     if presetx != 'sr':
-        sr_opts = f"-x {presetx} -N20 --secondary=no --sam-hit-only -a"
+        sr_opts = f"-x {presetx} -N20 --eqx --secondary=no --sam-hit-only -a"
 
     bash_cmd   = f"set -o pipefail; set -x;"
     mm2_cmd    = f"minimap2 {sr_opts} -t{threads} {db}.mmi {input_file}"
@@ -1390,7 +1383,7 @@ def preprocess_nanopore_reads(reads, outdir, prefix, silent):
 
     print_message("Splitting nanopore reads into chunks...", silent, begin_t, logfile)
     try:
-        chunk_count = split_reads.split_to_fasta(input_path, output_path)
+        chunk_count = split_reads.split_to_fasta(input_path, output_path, split_length=150, step_length=150, drop_tail=True)
     except Exception as e:
         print_message(f"ERROR: Failed to split nanopore reads: {e}", silent, begin_t, logfile, errorout=1)
     else:
@@ -1431,9 +1424,12 @@ def split_reads_samfile_postprocessing(samfile, samfile_temp):
     idxmax = df.assign(_taxid_cnt=df.groupby(["QNAME_MAIN", "REF_TAXID"])["REF_TAXID"].transform("size")) \
                 .loc[lambda x: x["_taxid_cnt"] == x.groupby("QNAME_MAIN")["_taxid_cnt"].transform("max")] \
                 .index
-
     # Create a set of indices for faster lookup
     idxmax_set = set(idxmax.values)
+
+    # in the idxmax, get the index of the first occurrence of the chunk (QNAME_MAIN) for each read
+    idx1st = df.loc[idxmax].drop_duplicates(subset="QNAME_MAIN", keep="first").index
+    idx1st_set = set(idx1st.values)
 
     total_chunks = len(df)
     del idxmax
@@ -1446,7 +1442,11 @@ def split_reads_samfile_postprocessing(samfile, samfile_temp):
                 logging.debug(f'Processed {idx} lines...')
             
             if idx in idxmax_set:
-                fout.write(line)
+                if idx in idx1st_set:
+                    fout.write(f"{line.rstrip()}\tZC:i:1\n")
+                else:
+                    fout.write(line)
+
     logging.info(f'Done writing {len(idxmax_set)} hits.')
 
     return True, total_chunks, len(idxmax_set)
@@ -1749,6 +1749,7 @@ def main(args):
     logfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.log"
     set_start_method("fork") # for default multiprocessing method
     excluded_acc_list = set()
+    split_read_flag = False
     res_df = pd.DataFrame() # aggregated restuls
 
     logging_level = logging.WARNING
@@ -1800,6 +1801,9 @@ def main(args):
 
         out_fp = open(outfile, 'w')
 
+    # display the command line
+    logging.info( ' '.join(sys.argv) )
+
     print_message( f"GOTTCHA (v{__version__})", argvs.silent, begin_t, logfile )
     print_message( f"Arguments and dependencies checked:", argvs.silent, begin_t, logfile )
     if argvs.input:
@@ -1821,18 +1825,15 @@ def main(args):
     if argvs.extract:
         print_message( f"    Extract seqs       : {argvs.extract}",     argvs.silent, begin_t, logfile )
     if argvs.minCov > 0:
-        print_message( f"    Minimal SIG cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile ) #SIG_COV
+        print_message( f"    Minimal SIG cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile )
     if argvs.minLen > 0:
-        print_message( f"    Minimal SIG len    : {argvs.minLen}",      argvs.silent, begin_t, logfile ) #COVERED_SIG_LEN
+        print_message( f"    Minimal SIG length : {argvs.minLen}",      argvs.silent, begin_t, logfile )
     if argvs.minReads > 0:
         print_message( f"    Minimal reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile )
     if argvs.matchFactor > 0:
         print_message( f"    Minimal mFactor    : {argvs.matchFactor}", argvs.silent, begin_t, logfile )
     if argvs.maxZscore > 0:
         print_message( f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile )
-
-    # display the command line
-    logging.info( f"COMMAND: {' '.join(sys.argv)}")
 
     #load taxonomy
     print_message( "Loading taxonomy information...", argvs.silent, begin_t, logfile )
@@ -1873,6 +1874,7 @@ def main(args):
         if argvs.nanopore:
             print_message( "Checking nanopore read files...", argvs.silent, begin_t, logfile )
             argvs.input = preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
+            split_read_flag = True
 
         print_message( "Running read-mapping...", argvs.silent, begin_t, logfile )
         exitcode, cmd, msg = readMapping( argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
@@ -1920,7 +1922,7 @@ def main(args):
     # processing SAM file and generate results
     if not argvs.extractOnly:
         print_message( "Processing SAM file...", argvs.silent, begin_t, logfile )
-        (res, mapped_r_cnt, tol_alignment_count, tol_invalid_match_count, tol_exclude_acc_count) = process_sam_file( os.path.abspath(samfile), argvs.threads, argvs.matchFactor, excluded_acc_list)
+        (res, mapped_r_cnt, tol_alignment_count, tol_invalid_match_count, tol_exclude_acc_count) = process_sam_file( os.path.abspath(samfile), argvs.threads, argvs.matchFactor, split_read_flag, excluded_acc_list)
         print_message( f" - {tol_alignment_count} mapped reads processed", argvs.silent, begin_t, logfile )
         print_message( f" - {tol_invalid_match_count} reads did not meet matching criteria", argvs.silent, begin_t, logfile )
         print_message( f" - {tol_exclude_acc_count} reads mapped to the excluded accessions", argvs.silent, begin_t, logfile )
@@ -1954,14 +1956,18 @@ def main(args):
                                 (res_df['NOTE'].str.contains('Not shown', na=False) == False)
                 target_df = res_df.loc[target_idx, ['ABUNDANCE','TAXID']]
                 tax_num = len(target_df)
+
+                print_message( f"{tax_num} qualified {argvs.dbLevel} profiled.", argvs.silent, begin_t, logfile )
+
                 if tax_num:
                     generate_lineage_file(target_df, outfile_lineage)
 
-                if argvs.mpa:
-                    generate_mpa_file(target_df, outfile_mpa)
-                    print_message( f"MPA format file saved to {outfile_mpa}.", argvs.silent, begin_t, logfile )
+                    if argvs.mpa:
+                        target_df = res_df.loc[target_idx, ['TAXID', 'REL_ABUNDANCE', 'REL_ABUNDANCE_GC','READ_COUNT', 'SIG_COV']]
+                        generate_mpa_file(target_df, outfile_mpa)
+                        print_message( f"MPA format file saved to {outfile_mpa}.", argvs.silent, begin_t, logfile )
 
-                print_message( f"{tax_num} qualified {argvs.dbLevel} profiled; Results saved to {outfile}.", argvs.silent, begin_t, logfile )
+                print_message( f"Results saved to {outfile}.", argvs.silent, begin_t, logfile )
         else:
             print_message( "GOTTCHA2 stopped.", argvs.silent, begin_t, logfile)
             sys.exit(0)
@@ -1998,3 +2004,4 @@ def main(args):
 
 if __name__ == '__main__':
     main(sys.argv[1:])
+
