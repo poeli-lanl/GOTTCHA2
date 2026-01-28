@@ -437,9 +437,18 @@ def parse(line, matchFactor, excluded_acc_list=None):
     temp = line.split('\t')
     name = temp[0]
     cigr = temp[5]
+    mapped_len = 0
+
+    # parse NM tag for mismatch length
+    mismatch_len = search(r'NM:i:(\d+)', line)
+    mismatch_len = int(mismatch_len.group(1)) if mismatch_len else 0
 
     # parse the CIGAR string for match length, search all r'(\d+)M' and sum all matches
-    mapped_len = sum(int(num) for num in findall(r'(\d+)M', cigr))
+    if "M" in cigr:
+        mapped_len = sum(int(num) for num in findall(r'(\d+)M', cigr))
+    else:
+        mapped_len = sum(int(num) for num in findall(r'(\d+)=', cigr))
+        mapped_len += mismatch_len
 
     # count for deletion and insertion length
     ins_len = 0
@@ -450,8 +459,6 @@ def parse(line, matchFactor, excluded_acc_list=None):
         del_len = sum(int(num) for num in findall(r'(\d+)D', cigr)) if 'D' in cigr else 0
     indel_len = ins_len + del_len
 
-    mismatch_len = search(r'NM:i:(\d+)', line)
-    mismatch_len = int(mismatch_len.group(1)) if mismatch_len else 0
     start = int(temp[3])
     end   = start + mapped_len + del_len - 1
     read_len = len(temp[9])
@@ -1199,11 +1206,11 @@ def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
 
     # Fields for full mode
     cols = ['LEVEL', 'NAME', 'TAXID', 'READ_COUNT', 'TOTAL_BP_MAPPED',
-            'SNI_SCORE', 'COVERED_SIG_LEN', 'BEST_SIG_COV', 'DEPTH', 'REL_ABUNDANCE', # summary
+            'SNI_SCORE', 'COVERED_SIG_LEN', 'BEST_SIG_COV', 'DEPTH', 'REL_ABUNDANCE_GC', 'REL_ABUNDANCE', # summary
             'PARENT_NAME', 'PARENT_TAXID', # parants
             'TOTAL_READ_LEN', 'READ_IDT', 'TOTAL_BP_MISMATCH', 'TOTAL_BP_INDEL', 'SNI_NAIVE', 'SNI_CI95_LH', # read stats
             'SIG_COV', 'MAPPED_SIG_LEN', 'TOTAL_SIG_LEN', 'COVERED_SIG_DEPTH', 'COVERED_MAPPED_SIG_COV', 'ZSCORE', # signature stats
-            'GENOMIC_CONTENT_EST', 'ABUNDANCE', 'REL_ABUNDANCE_DEPTH', 'REL_ABUNDANCE_GC', # abundance
+            'GENOMIC_CONTENT_EST', 'ABUNDANCE', 'REL_ABUNDANCE_DEPTH', # abundance
             'SIG_LEVEL', 'GENOME_COUNT', 'GENOME_SIZE', 'NOTE' # ref genome
             ]
 
@@ -1215,7 +1222,7 @@ def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
 
     # get qualified taxa
     non_qualified_idx = rep_df['NOTE'].str.contains('Filtered out', na=False) | rep_df['NOTE'].str.contains('Not shown', na=False) 
-    qualified_df = rep_df.loc[~non_qualified_idx, cols[:10]]
+    qualified_df = rep_df.loc[~non_qualified_idx, cols[:11]]  # first 11 columns are summary
 
     sep = ',' if fmt=='csv' else '\t'
     
@@ -1302,7 +1309,7 @@ def generate_mpa_file(target_df, o):
     """
 
     lineage_df = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, all_major_rank=True, print_strain=False, space2underscore=True, sep=";"))
-    result = pd.concat([target_df[['TAXID', 'REL_ABUNDANCE', 'READ_COUNT', 'SIG_COV']], lineage_df], axis=1, sort=False)
+    result = pd.concat([target_df[['TAXID', 'REL_ABUNDANCE', 'REL_ABUNDANCE_GC', 'READ_COUNT', 'SIG_COV']], lineage_df], axis=1, sort=False)
     result.to_csv(o, index=False, header=True, sep='\t', float_format='%.4f')
 
     return True
@@ -1335,10 +1342,10 @@ def readMapping(reads, db, threads, mm_options, presetx, samfile, logfile):
     input_file = " ".join([x.name for x in reads])
 
     # Minimap2 options for short reads: the options here is essentailly the -x 'sr' equivalent with some modifications on scoring
-    sr_opts = f"-x sr {mm_options} -a -N20 --MD --secondary=no --sam-hit-only"
+    sr_opts = f"-x sr {mm_options} -a -N20 --eqx --secondary=no --sam-hit-only"
     
     if presetx != 'sr':
-        sr_opts = f"-x {presetx} -N20 --secondary=no --sam-hit-only -a"
+        sr_opts = f"-x {presetx} -N20 --eqx --secondary=no --sam-hit-only -a"
 
     bash_cmd   = f"set -o pipefail; set -x;"
     mm2_cmd    = f"minimap2 {sr_opts} -t{threads} {db}.mmi {input_file}"
@@ -1956,7 +1963,7 @@ def main(args):
                     generate_lineage_file(target_df, outfile_lineage)
 
                     if argvs.mpa:
-                        target_df = res_df.loc[target_idx, ['TAXID', 'REL_ABUNDANCE', 'READ_COUNT', 'SIG_COV']]
+                        target_df = res_df.loc[target_idx, ['TAXID', 'REL_ABUNDANCE', 'REL_ABUNDANCE_GC','READ_COUNT', 'SIG_COV']]
                         generate_mpa_file(target_df, outfile_mpa)
                         print_message( f"MPA format file saved to {outfile_mpa}.", argvs.silent, begin_t, logfile )
 
@@ -1997,3 +2004,4 @@ def main(args):
 
 if __name__ == '__main__':
     main(sys.argv[1:])
+
