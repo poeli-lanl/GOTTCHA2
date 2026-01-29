@@ -50,7 +50,7 @@ setup(
             'gottcha2=gottcha.scripts.cmd:gottcha2_command',
         ],
     },
-    scripts=['gottcha/scripts/gottcha2.py', 'gottcha/scripts/pull_database.py', 'gottcha/scripts/taxonomy.py', 'gottcha/scripts/cmd.py'],
+    scripts=['gottcha/scripts/gottcha2.py', 'gottcha/scripts/pull_database.py', 'gottcha/scripts/taxonomy.py', 'gottcha/scripts/cmd.py', 'gottcha/scripts/split_reads.py'],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Environment :: Console",
