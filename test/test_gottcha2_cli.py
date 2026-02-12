@@ -77,13 +77,13 @@ class TestGottcha2CLI(unittest.TestCase):
         self.assertEqual(args.minCov, 0)
         self.assertEqual(args.minReads, 0)
         self.assertEqual(args.minLen, 0)
-        self.assertEqual(args.matchFactor, 0)
+        self.assertEqual(args.matchFraction, 0)
         self.assertEqual(args.maxZscore, 0)
         
         # Test nanopore option
         args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-np'])
         self.assertEqual(args.minReads, 0)
-        self.assertEqual(args.matchFactor, 0)
+        self.assertEqual(args.matchFraction, 0)
 
         # Test nanopore option with multiple input files
         with self.assertRaises(SystemExit):

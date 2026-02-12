@@ -70,9 +70,6 @@ def parse_params(ver, args):
     p.add_argument( '-np','--nanopore', action="store_true",
                     help="Indicate that the input reads are from Oxford Nanopore sequencing platform. This option enables read splitting and error rate set to 0.03 if not specified.")
 
-    p.add_argument( '-pm','--mismatch', metavar='<INT>', type=int, default=10,
-                    help="Mismatch penalty for the aligner. [default: 10] (deprecated)")
-
     p.add_argument('-e', '--extract', metavar='TAXON[,TAXON2,...]', type=str, default=None,
                     help=(
                         "Extract mapped reads for specific taxa to a FASTA or FASTQ file.\n"
@@ -133,8 +130,14 @@ def parse_params(ver, args):
     p.add_argument( '-mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
                     help="Maximum estimated z-score for the depths of the mapped region. Set to 0 to disable. [default: 0]")
 
-    p.add_argument( '-mf','--matchFactor', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum fraction of the read or signature fragment required to be considered a valid match. [default: 0]")
+    p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0,
+                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0]")
+
+    p.add_argument( '-mg','--matchLength', metavar='<INT>', type=int, default=0,
+                    help="Minimum length of the alignment required to be considered a valid match. [default: 0]")
+
+    p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float, default=0,
+                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0]")
 
     p.add_argument( '-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str, default='0.9,0.95,0.99',
                     help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
@@ -332,7 +335,7 @@ def merge_ranges(ranges):
                 merged.append(current)
     return merged
 
-def worker(filename, chunkStart, chunkSize, matchFactor, split_read_flag=False, excluded_acc_list=None):
+def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity=0, matchLength=0, split_read_flag=False, excluded_acc_list=None):
     """
     Process a chunk of a SAM file to extract mapping information.
     
@@ -344,7 +347,8 @@ def worker(filename, chunkStart, chunkSize, matchFactor, split_read_flag=False, 
         filename (str): Path to the SAM file to process
         chunkStart (int): Byte position in the file where to start reading
         chunkSize (int): Number of bytes to read from the start position
-        matchFactor (float): Minimum fraction required for a valid match
+        matchFraction (float): Minimum fraction required for a valid match
+        matchIdentity (float): Minimum identity required for a valid match
         split_read_flag (bool): Flag indicating whether to split reads (optional)
         excluded_acc_list (set): Set of accession# to exclude from processing (optional)
         
@@ -363,7 +367,7 @@ def worker(filename, chunkStart, chunkSize, matchFactor, split_read_flag=False, 
     exclude_acc_count=0
 
     for line in lines:
-        k, r, nm, nid, rd, rs, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, valid_acc_flag, sr_chunk_flag = parse(line, matchFactor, excluded_acc_list)
+        k, r, nm, nid, rd, rs, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, valid_acc_flag, sr_chunk_flag = parse(line, matchFraction, matchIdentity, matchLength, excluded_acc_list)
         # parsed values from SAM line
         # only k, r, n, pri_aln_flag, valid_flag are used
         # k: reference name
@@ -401,17 +405,19 @@ def worker(filename, chunkStart, chunkSize, matchFactor, split_read_flag=False, 
     
     return (res, len(lines), invalid_match_count, exclude_acc_count)
 
-def parse(line, matchFactor, excluded_acc_list=None):
+def parse(line, matchFraction, matchIdentity=0, matchLength=0, excluded_acc_list=None):
     """
     Parse a line from a SAM file and extract relevant mapping information.
     
     Parses alignment details from a SAM format line, including reference ID, 
     match position, mismatches, sequence quality, and flags. Determines if
-    the alignment is a valid match based on matchFactor criteria.
+    the alignment is a valid match based on matchFraction criteria.
     
     Parameters:
         line (str): A line from a SAM file
-        matchFactor (float): Minimum fraction required for a valid match
+        matchFraction (float): Minimum fraction required for a valid match
+        matchIdentity (float): Minimum identity required for a valid match
+        matchLength (int): Minimum length required for a valid match
         excluded_acc_list (set): Set of accession# to exclude from processing (optional)
         
     Returns:
@@ -476,18 +482,19 @@ def parse(line, matchFactor, excluded_acc_list=None):
     # check if this is a primary alignment 256=secondary, 2048=supplementary
     primary_alignment_flag=False if int(temp[1]) & 2304 else True
 
-    # the alignment region should cover at least matchFactor(proportion) of the read or signature fragment
+    # the alignment region should cover at least matchFraction(proportion) of the read or signature fragment
     valid_match_flag = True
     valid_acc_flag = True
 
-    # get the max matching identity
-    match_idt = max(mapped_len/rlen, mapped_len/read_len)
+    # get the max matching proportion of the read or the signature fragment
+    match_prop = max(mapped_len/rlen, mapped_len/read_len)
+    # get the match identity of the mapped region
+    match_idt = ((mapped_len-(indel_len + mismatch_len)) / mapped_len) if mapped_len > 0 else 0
 
-    if matchFactor > 0:
-        if match_idt >= matchFactor:
-            valid_match_flag = True
-        else:
-            valid_match_flag = False
+    if (match_prop >= matchFraction) and (match_idt >= matchIdentity) and (mapped_len >= matchLength):
+        valid_match_flag = True
+    else:
+        valid_match_flag = False
 
     if excluded_acc_list:
         valid_acc_flag = False if acc in excluded_acc_list else True
@@ -548,7 +555,7 @@ def chunkify(fname, size=1*1024*1024):
             if chunkEnd > fileEnd:
                 break
 
-def process_sam_file(sam_fn, numthreads, matchFactor, split_read_flag=False, excluded_acc_list=None):
+def process_sam_file(sam_fn, numthreads, matchFraction, matchIdentity=0, matchLength=0, split_read_flag=False, excluded_acc_list=None):
     """
     Process a SAM file using parallel execution to extract mapping information.
     
@@ -558,7 +565,8 @@ def process_sam_file(sam_fn, numthreads, matchFactor, split_read_flag=False, exc
     Parameters:
         sam_fn (str): Path to the SAM file
         numthreads (int): Number of parallel processes to use
-        matchFactor (float): Minimum fraction required for a valid match
+        matchFraction (float): Minimum fraction required for a valid match
+        matchIdentity (float): Minimum identity required for a valid match
         split_read_flag (bool): Flag indicating whether to split reads (optional)
         
     Returns:
@@ -582,7 +590,15 @@ def process_sam_file(sam_fn, numthreads, matchFactor, split_read_flag=False, exc
     tol_alignment_count = 0
 
     for chunkStart,chunkSize in chunkify(sam_fn):
-        jobs.append( pool.apply_async(worker, (sam_fn,chunkStart,chunkSize,matchFactor,split_read_flag,excluded_acc_list)) )
+        _params = (sam_fn,
+                  chunkStart,
+                  chunkSize,
+                  matchFraction,
+                  matchIdentity,
+                  matchLength,
+                  split_read_flag,
+                  excluded_acc_list)
+        jobs.append( pool.apply_async(worker, _params) )
 
     #wait for all jobs to finish
     tol_jobs = len(jobs)
@@ -632,7 +648,8 @@ def extract_sequences_by_taxonomy(sam_fn,
                                   qualified_taxids, 
                                   o, 
                                   numthreads, 
-                                  matchFactor, 
+                                  matchFraction, 
+                                  matchIdentity,
                                   max_per_taxon, 
                                   excluded_acc_list,
                                   format='fasta'):
@@ -646,7 +663,8 @@ def extract_sequences_by_taxonomy(sam_fn,
         full_tsv_fn (str): Path to the full taxonomy report file
         o (file): Output file handle for the extracted sequences
         numthreads (int): Number of threads to use for processing
-        matchFactor (float): Minimum fraction required for a valid match
+        matchFraction (float): Minimum fraction required for a valid match
+        matchIdentity (float): Minimum identity required for a valid match
         max_per_taxon (int): Maximum number of sequences to extract per taxon; 0 is unlimited.
         format (str): Output format ('fasta' or 'fastq')
         
@@ -679,7 +697,7 @@ def extract_sequences_by_taxonomy(sam_fn,
         for chunkStart, chunkSize in batch_chunks:
             jobs.append(pool.apply_async(
                 OptimizedFastaWorker, 
-                (sam_fn, chunkStart, chunkSize, taxa_dict, qualified_taxids, matchFactor, max_per_taxon, excluded_acc_list, format)
+                (sam_fn, chunkStart, chunkSize, taxa_dict, qualified_taxids, matchFraction, matchIdentity, matchLength, max_per_taxon, excluded_acc_list, format)
             ))
         
         # Process results as they complete
@@ -728,7 +746,7 @@ def extract_sequences_by_taxonomy(sam_fn,
     
     return taxon_count, total_seqs
 
-def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_taxids, matchFactor, max_per_taxon, excluded_acc_list, format):
+def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_taxids, matchFraction, matchIdentity, matchLength, max_per_taxon, excluded_acc_list, format):
     """
     Worker function that processes a chunk of the SAM file and extracts sequences for all taxa.
     
@@ -738,7 +756,8 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
         chunkSize (int): Size of the chunk to process
         taxa_dict (dict): Dictionary mapping taxids to their level and name
         qualified_taxids (list): List of taxids to check against
-        matchFactor (float): Minimum fraction required for a valid match
+        matchFraction (float): Minimum fraction required for a valid match
+        matchIdentity (float): Minimum identity required for a valid match
         max_per_taxon (int): Maximum sequences to extract per taxon
         format (str): Output format ('fasta' or 'fastq')
         
@@ -760,7 +779,7 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
         processed_lines += 1
         
         try:
-            ref, region, nm, nid, rname, rseq, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, valid_acc_flag, sr_chunk_flag = parse(line, matchFactor, excluded_acc_list)
+            ref, region, nm, nid, rname, rseq, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, valid_acc_flag, sr_chunk_flag = parse(line, matchFraction, matchIdentity, matchLength, excluded_acc_list)
             
             if not (pri_aln_flag and valid_match_flag and valid_acc_flag):
                 continue
@@ -1345,7 +1364,7 @@ def readMapping(reads, db, threads, mm_options, presetx, samfile, logfile):
     sr_opts = f"-x sr {mm_options} -a -N20 --eqx --secondary=no --sam-hit-only"
     
     if presetx != 'sr':
-        sr_opts = f"-x {presetx} -N20 --eqx --secondary=no --sam-hit-only -a"
+        sr_opts = f"-x {presetx} -N20 --secondary=no --sam-hit-only -a"
 
     bash_cmd   = f"set -o pipefail; set -x;"
     mm2_cmd    = f"minimap2 {sr_opts} -t{threads} {db}.mmi {input_file}"
@@ -1830,8 +1849,12 @@ def main(args):
         print_message( f"    Minimal SIG length : {argvs.minLen}",      argvs.silent, begin_t, logfile )
     if argvs.minReads > 0:
         print_message( f"    Minimal reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile )
-    if argvs.matchFactor > 0:
-        print_message( f"    Minimal mFactor    : {argvs.matchFactor}", argvs.silent, begin_t, logfile )
+    if argvs.matchFraction > 0:
+        print_message( f"    Minimal mFraction  : {argvs.matchFraction}", argvs.silent, begin_t, logfile )
+    if argvs.matchIdentity > 0:
+        print_message( f"    Minimal mIdentity  : {argvs.matchIdentity}", argvs.silent, begin_t, logfile )
+    if argvs.matchLength > 0:
+        print_message( f"    Minimal mLength    : {argvs.matchLength}", argvs.silent, begin_t, logfile )
     if argvs.maxZscore > 0:
         print_message( f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile )
 
@@ -1922,7 +1945,7 @@ def main(args):
     # processing SAM file and generate results
     if not argvs.extractOnly:
         print_message( "Processing SAM file...", argvs.silent, begin_t, logfile )
-        (res, mapped_r_cnt, tol_alignment_count, tol_invalid_match_count, tol_exclude_acc_count) = process_sam_file( os.path.abspath(samfile), argvs.threads, argvs.matchFactor, split_read_flag, excluded_acc_list)
+        (res, mapped_r_cnt, tol_alignment_count, tol_invalid_match_count, tol_exclude_acc_count) = process_sam_file( os.path.abspath(samfile), argvs.threads, argvs.matchFraction, argvs.matchIdentity, argvs.matchLength, split_read_flag, excluded_acc_list)
         print_message( f" - {tol_alignment_count} mapped reads processed", argvs.silent, begin_t, logfile )
         print_message( f" - {tol_invalid_match_count} reads did not meet matching criteria", argvs.silent, begin_t, logfile )
         print_message( f" - {tol_exclude_acc_count} reads mapped to the excluded accessions", argvs.silent, begin_t, logfile )
@@ -1939,7 +1962,18 @@ def main(args):
             (sni_score_cutoff, sni_score_species, sni_score_strain) = [float(x) for x in argvs.sniScore.split(',')]
 
             # aggregate the results
-            res_df = aggregate_taxonomy(res, argvs.relAbu, argvs.dbLevel , argvs.minCov, argvs.minReads, argvs.minLen, argvs.maxZscore, sni_score_species, sni_score_strain, sni_score_cutoff, argvs.errorRate)
+            _params = (res, 
+                       argvs.relAbu, 
+                       argvs.dbLevel, 
+                       argvs.minCov, 
+                       argvs.minReads, 
+                       argvs.minLen, 
+                       argvs.maxZscore, 
+                       sni_score_species, 
+                       sni_score_strain, 
+                       sni_score_cutoff, 
+                       argvs.errorRate)
+            res_df = aggregate_taxonomy(*_params)
             print_message( "Done taxonomy aggregation.", argvs.silent, begin_t, logfile )
 
             if not len(res_df):
@@ -1997,11 +2031,21 @@ def main(args):
 
             # Extract FASTA sequences based on the taxonomy entries
             print_message(f"Extracting up to {max_per_taxon} {out_format} sequences per taxon...", argvs.silent, begin_t, logfile)
-            taxon_count, seq_count = extract_sequences_by_taxonomy(os.path.abspath(samfile), taxa_dict, qualified_taxids,
-                                                                out_fp, argvs.threads, argvs.matchFactor, max_per_taxon, excluded_acc_list, out_format)
+
+            _params = (os.path.abspath(samfile), 
+                       taxa_dict, 
+                       qualified_taxids,
+                       out_fp, 
+                       argvs.threads, 
+                       argvs.matchFraction, 
+                       argvs.matchIdentity, 
+                       argvs.matchLength, 
+                       max_per_taxon, 
+                       excluded_acc_list, 
+                       out_format)
+            taxon_count, seq_count = extract_sequences_by_taxonomy(*_params)
             print_message(f"Done extracting {seq_count} sequences from {taxon_count} taxa to '{outfile}'.", 
                             argvs.silent, begin_t, logfile)
 
 if __name__ == '__main__':
     main(sys.argv[1:])
-

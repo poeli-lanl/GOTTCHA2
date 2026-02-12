@@ -215,14 +215,14 @@ class TestGottcha2Integration(unittest.TestCase):
         
         # Test with exclusion
         exclude_set = {"ABC"}
-        _, _, _, _, _, _, _, _, _, _, _, valid_match_flag2, valid_acc_flag2, zc_flag2 = gottcha2.parse(sam_line, 0.5, exclude_set)
+        _, _, _, _, _, _, _, _, _, _, _, valid_match_flag2, valid_acc_flag2, zc_flag2 = gottcha2.parse(sam_line, 0.5, 0, 0, exclude_set)
         self.assertTrue(valid_match_flag2)
         self.assertFalse(valid_acc_flag2)
         self.assertTrue(zc_flag2)
         
         # Test with a different accession that's not excluded
         sam_line2 = "read3\t0\tDEF|1|100|67890\t11\t60\t5S10M3S\t*\t0\t0\tGGGGGCCCCCCCCCGGG\tHHHHHHHHHHHHHHHHH\tNM:i:0\tAS:i:10\tXS:i:0"
-        _, _, _, _, _, _, _, _, _, _, _, valid_match_flag3, valid_acc_flag3, zc_flag3 = gottcha2.parse(sam_line2, 0.5, exclude_set)
+        _, _, _, _, _, _, _, _, _, _, _, valid_match_flag3, valid_acc_flag3, zc_flag3 = gottcha2.parse(sam_line2, 0.5, 0, 0, exclude_set)
         self.assertTrue(valid_match_flag3)
         self.assertTrue(valid_acc_flag3)
         self.assertFalse(zc_flag3)
@@ -235,7 +235,7 @@ class TestGottcha2Integration(unittest.TestCase):
             f.write("read1\t0\tABC|1|100|12345\t11\t60\t5S10M3S\t*\t0\t0\tGGGGGCCCCCCCCCGGG\tHHHHHHHHHHHHHHHHH\tNM:i:0\tAS:i:10\tXS:i:0\n")
             f.write("read2\t0\tXYZ|1|100|67890\t21\t60\t5S10M3S\t*\t0\t0\tGGGGGCCCCCCCCCGGG\tHHHHHHHHHHHHHHHHH\tNM:i:0\tAS:i:10\tXS:i:0\n")
             f.write("read3\t0\tDEF|1|100|54321\t31\t60\t5S10M3S\t*\t0\t0\tGGGGGCCCCCCCCCGGG\tHHHHHHHHHHHHHHHHH\tNM:i:0\tAS:i:10\tXS:i:0\n")
-        
+
         # Test without exclusion
         result_no_exclude, lines_count1, invalid_match_count1, exclude_acc_count1 = gottcha2.worker(test_sam, 0, os.path.getsize(test_sam), 0.5)
         self.assertEqual(len(result_no_exclude), 3)
@@ -248,7 +248,7 @@ class TestGottcha2Integration(unittest.TestCase):
         
         # Test with exclusion
         exclude_set = {"ABC", "XYZ"}
-        result_with_exclude, lines_count2, invalid_match_count2, exclude_acc_count2 = gottcha2.worker(test_sam, 0, os.path.getsize(test_sam), 0.5, False, exclude_set)
+        result_with_exclude, lines_count2, invalid_match_count2, exclude_acc_count2 = gottcha2.worker(test_sam, 0, os.path.getsize(test_sam), 0.5, 0, 0, False, exclude_set)
         self.assertEqual(len(result_with_exclude), 1)
         self.assertNotIn("ABC|1|100|12345", result_with_exclude)
         self.assertNotIn("XYZ|1|100|67890", result_with_exclude)
@@ -293,13 +293,20 @@ class TestGottcha2Integration(unittest.TestCase):
         exclude_set = gottcha2.load_excluded_acc_list(acc_file)
             
         result, mapped_reads, tol_alignment_count, tol_invalid_match_count, tol_exclude_acc_count = gottcha2.process_sam_file(
-            self.sam_file, 1, 0.5, False, exclude_set
+            self.sam_file, 1, 0.5, 0, 0, False, exclude_set
         )
         
         # Check the results
         mock_pool.return_value.apply_async.assert_called_with(
             gottcha2.worker, 
-            (self.sam_file, mock_pool.return_value.apply_async.call_args[0][1][1], mock_pool.return_value.apply_async.call_args[0][1][2], 0.5, False, exclude_set)
+                (self.sam_file, 
+                 mock_pool.return_value.apply_async.call_args[0][1][1], 
+                 mock_pool.return_value.apply_async.call_args[0][1][2], 
+                 0.5, 
+                 0, 
+                 0, 
+                 False, 
+                 exclude_set)
         )
         
         # Only one reference should be in the result
