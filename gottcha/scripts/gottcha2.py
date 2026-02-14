@@ -2,7 +2,7 @@
 
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", "Anna Chernikov", "Jason Gans", "Tracey Freites", "Patrick Chain"]
-__version__   = "2.2.0"
+__version__   = "2.2.1"
 
 import argparse as ap
 import sys, os, time, subprocess
@@ -25,7 +25,7 @@ except ImportError:
     import taxonomy as gt
     import split_reads
 
-def parse_params(ver, args):
+def parse_args(ver, args):
     """
     Parse and validate command line arguments for GOTTCHA2.
     
@@ -145,8 +145,11 @@ def parse_params(ver, args):
     p.add_argument( '-nc','--noCutoff', action="store_true",
                     help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -ss 0,0,0]")
 
-    p.add_argument( '-A','--accExclusionList', metavar='[FILE]', required=False, type=str,
-                    help="List of excluded accessions from the database (e.g. plasmid accessions).")
+    p.add_argument( '-a','--accList', metavar='[FILE]', required=False, type=str,
+                    help="A file of list with accessions of interested (e.g. plasmid accessions).")
+
+    p.add_argument( '-aa','--accListAction', choices=['exclude', 'only', 'report'], default='report', type=str,
+                    help="Action to take with the reads aligned to the reference on the accession list.  [default: report]")
 
     p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
                     help="The multiple hit removal step is automatically enabled for sequence input files and disabled for SAM files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
@@ -220,10 +223,10 @@ def parse_params(ver, args):
         sam_path_name = sam_path if sam_path == '-' else os.path.abspath(sam_path)
         args_parsed.sam = [SimpleNamespace(name=sam_path_name)]
 
-    if args_parsed.accExclusionList:
-        if not os.path.isfile(args_parsed.accExclusionList):
-            p.error(f'Accession exclusion list {args_parsed.accExclusionList} not found.')
-        args_parsed.accExclusionList = os.path.abspath(args_parsed.accExclusionList)
+    if args_parsed.accList:
+        if not os.path.isfile(args_parsed.accList):
+            p.error(f'Accession exclusion list {args_parsed.accList} not found.')
+        args_parsed.accList = os.path.abspath(args_parsed.accList)
 
     if args_parsed.nanopore and args_parsed.input and len(args_parsed.input) != 1:
         p.error( '--nanopore option requires a single input read file.' )
@@ -335,7 +338,7 @@ def merge_ranges(ranges):
                 merged.append(current)
     return merged
 
-def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity=0, matchLength=0, split_read_flag=False, excluded_acc_list=None):
+def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity, matchLength, split_read_flag=False):
     """
     Process a chunk of a SAM file to extract mapping information.
     
@@ -350,13 +353,12 @@ def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity=0, matc
         matchFraction (float): Minimum fraction required for a valid match
         matchIdentity (float): Minimum identity required for a valid match
         split_read_flag (bool): Flag indicating whether to split reads (optional)
-        excluded_acc_list (set): Set of accession# to exclude from processing (optional)
         
     Returns:
         dict: Dictionary with reference sequences as keys and mapping statistics as values
         int: Number of lines processed in this chunk
         int: Number of invalid matches found
-        int: Number of excluded accessions found
+        int: Number of reportable accessions found
     """
     # processing alignments in SAM format
     f = open( filename )
@@ -364,10 +366,9 @@ def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity=0, matc
     lines = f.read(chunkSize).splitlines()
     res={}
     invalid_match_count=0
-    exclude_acc_count=0
 
     for line in lines:
-        k, r, nm, nid, rd, rs, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, valid_acc_flag, sr_chunk_flag = parse(line, matchFraction, matchIdentity, matchLength, excluded_acc_list)
+        k, r, nm, nid, rd, rs, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, sr_chunk_flag = parse(line, matchFraction, matchIdentity, matchLength)
         # parsed values from SAM line
         # only k, r, n, pri_aln_flag, valid_flag are used
         # k: reference name
@@ -382,11 +383,8 @@ def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity=0, matc
 
         if not valid_match_flag:
             invalid_match_count += 1
-        
-        if not valid_acc_flag:
-            exclude_acc_count += 1
 
-        if pri_aln_flag and valid_match_flag and valid_acc_flag:
+        if pri_aln_flag and valid_match_flag:
             if k in res:
                 res[k]['REGIONS'] = merge_ranges(res[k]['REGIONS']+[r])
                 res[k]["MB"] += r[1] - r[0] + 1
@@ -403,9 +401,9 @@ def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity=0, matc
                 res[k]["ID"] = nid
                 res[k]["RL"] = read_len
     
-    return (res, len(lines), invalid_match_count, exclude_acc_count)
+    return (res, len(lines), invalid_match_count)
 
-def parse(line, matchFraction, matchIdentity=0, matchLength=0, excluded_acc_list=None):
+def parse(line, matchFraction, matchIdentity, matchLength):
     """
     Parse a line from a SAM file and extract relevant mapping information.
     
@@ -417,8 +415,6 @@ def parse(line, matchFraction, matchIdentity=0, matchLength=0, excluded_acc_list
         line (str): A line from a SAM file
         matchFraction (float): Minimum fraction required for a valid match
         matchIdentity (float): Minimum identity required for a valid match
-        matchLength (int): Minimum length required for a valid match
-        excluded_acc_list (set): Set of accession# to exclude from processing (optional)
         
     Returns:
         tuple: (
@@ -432,7 +428,7 @@ def parse(line, matchFraction, matchIdentity=0, matchLength=0, excluded_acc_list
             cigar (str): CIGAR string,
             primary_alignment_flag (bool): Whether this is a primary alignment,
             valid_match_flag: whether this alignment meets match criteria
-            valid_acc_flag: whether this alignment maps to a valid accession
+
         )
     
     Example:
@@ -484,7 +480,6 @@ def parse(line, matchFraction, matchIdentity=0, matchLength=0, excluded_acc_list
 
     # the alignment region should cover at least matchFraction(proportion) of the read or signature fragment
     valid_match_flag = True
-    valid_acc_flag = True
 
     # get the max matching proportion of the read or the signature fragment
     match_prop = max(mapped_len/rlen, mapped_len/read_len)
@@ -496,10 +491,19 @@ def parse(line, matchFraction, matchIdentity=0, matchLength=0, excluded_acc_list
     else:
         valid_match_flag = False
 
-    if excluded_acc_list:
-        valid_acc_flag = False if acc in excluded_acc_list else True
-
-    return ref, (start, end), mismatch_len, indel_len, name, temp[9], temp[10], temp[1], temp[5], read_len, primary_alignment_flag, valid_match_flag, valid_acc_flag, sr_chunk_flag
+    return (ref, 
+            (start, end), 
+            mismatch_len, 
+            indel_len, 
+            name, 
+            temp[9], 
+            temp[10], 
+            temp[1], 
+            temp[5], 
+            read_len, 
+            primary_alignment_flag, 
+            valid_match_flag,
+            sr_chunk_flag)
 
 def time_spend(start):
     """
@@ -555,7 +559,7 @@ def chunkify(fname, size=1*1024*1024):
             if chunkEnd > fileEnd:
                 break
 
-def process_sam_file(sam_fn, numthreads, matchFraction, matchIdentity=0, matchLength=0, split_read_flag=False, excluded_acc_list=None):
+def process_sam_file(sam_fn, numthreads, matchFraction, matchIdentity, matchLength, split_read_flag=False):
     """
     Process a SAM file using parallel execution to extract mapping information.
     
@@ -575,7 +579,7 @@ def process_sam_file(sam_fn, numthreads, matchFraction, matchIdentity=0, matchLe
             mapped_reads (int): Total number of reads that mapped
             tol_alignment_count (int): Total number of alignments processed
             tol_invalid_match_count (int): Total number of invalid matches found
-            tol_exclude_acc_count (int): Total number of excluded accessions found
+            tol_reportable_acc_count (int): Total number of reportable accessions found
         )
     """
     result = gt._autoVivification()
@@ -586,19 +590,17 @@ def process_sam_file(sam_fn, numthreads, matchFraction, matchIdentity=0, matchLe
     jobs = []
     results = []
     tol_invalid_match_count = 0
-    tol_exclude_acc_count = 0
     tol_alignment_count = 0
 
     for chunkStart,chunkSize in chunkify(sam_fn):
-        _params = (sam_fn,
-                  chunkStart,
-                  chunkSize,
-                  matchFraction,
-                  matchIdentity,
-                  matchLength,
-                  split_read_flag,
-                  excluded_acc_list)
-        jobs.append( pool.apply_async(worker, _params) )
+        _args = (sam_fn,
+                 chunkStart,
+                 chunkSize,
+                 matchFraction,
+                 matchIdentity,
+                 matchLength,
+                 split_read_flag)
+        jobs.append( pool.apply_async(worker, _args) )
 
     #wait for all jobs to finish
     tol_jobs = len(jobs)
@@ -614,10 +616,9 @@ def process_sam_file(sam_fn, numthreads, matchFraction, matchIdentity=0, matchLe
 
     print_message( f" - Merging {tol_jobs} jobs...", argvs.silent, begin_t, logfile )
     for res_tuples in results:
-        (res, alignment_count, invalid_match_count, exclude_acc_count) = res_tuples
+        (res, alignment_count, invalid_match_count) = res_tuples
         tol_alignment_count += alignment_count
         tol_invalid_match_count += invalid_match_count
-        tol_exclude_acc_count += exclude_acc_count
 
         for k in res:
             if k in result:
@@ -641,7 +642,7 @@ def process_sam_file(sam_fn, numthreads, matchFraction, matchIdentity=0, matchLe
             del result[k]['REGIONS']
             mapped_reads += result[k]["MR"]
 
-    return result, mapped_reads, tol_alignment_count, tol_invalid_match_count, tol_exclude_acc_count
+    return result, mapped_reads, tol_alignment_count, tol_invalid_match_count
 
 def extract_sequences_by_taxonomy(sam_fn, 
                                   taxa_dict, 
@@ -650,8 +651,10 @@ def extract_sequences_by_taxonomy(sam_fn,
                                   numthreads, 
                                   matchFraction, 
                                   matchIdentity,
+                                  matchLength,
                                   max_per_taxon, 
-                                  excluded_acc_list,
+                                  acc_list,
+                                  acc_list_action,
                                   format='fasta'):
     """
     Extract sequences mapping to taxa from the full taxonomy report.
@@ -665,6 +668,7 @@ def extract_sequences_by_taxonomy(sam_fn,
         numthreads (int): Number of threads to use for processing
         matchFraction (float): Minimum fraction required for a valid match
         matchIdentity (float): Minimum identity required for a valid match
+        matchLength (int): Minimum length required for a valid match
         max_per_taxon (int): Maximum number of sequences to extract per taxon; 0 is unlimited.
         format (str): Output format ('fasta' or 'fastq')
         
@@ -697,7 +701,7 @@ def extract_sequences_by_taxonomy(sam_fn,
         for chunkStart, chunkSize in batch_chunks:
             jobs.append(pool.apply_async(
                 OptimizedFastaWorker, 
-                (sam_fn, chunkStart, chunkSize, taxa_dict, qualified_taxids, matchFraction, matchIdentity, matchLength, max_per_taxon, excluded_acc_list, format)
+                (sam_fn, chunkStart, chunkSize, taxa_dict, qualified_taxids, matchFraction, matchIdentity, matchLength, max_per_taxon, acc_list, acc_list_action, format)
             ))
         
         # Process results as they complete
@@ -746,7 +750,7 @@ def extract_sequences_by_taxonomy(sam_fn,
     
     return taxon_count, total_seqs
 
-def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_taxids, matchFraction, matchIdentity, matchLength, max_per_taxon, excluded_acc_list, format):
+def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_taxids, matchFraction, matchIdentity, matchLength, max_per_taxon, acc_list, acc_list_action, format):
     """
     Worker function that processes a chunk of the SAM file and extracts sequences for all taxa.
     
@@ -759,6 +763,8 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
         matchFraction (float): Minimum fraction required for a valid match
         matchIdentity (float): Minimum identity required for a valid match
         max_per_taxon (int): Maximum sequences to extract per taxon
+        acc_list (list, optional): List of accessions to filter
+        acc_list_action (str, optional): Action to take with the accession list (e.g., "include" or "exclude")
         format (str): Output format ('fasta' or 'fastq')
         
     Returns:
@@ -779,9 +785,9 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
         processed_lines += 1
         
         try:
-            ref, region, nm, nid, rname, rseq, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, valid_acc_flag, sr_chunk_flag = parse(line, matchFraction, matchIdentity, matchLength, excluded_acc_list)
+            ref, region, nm, nid, rname, rseq, rq, flag, cigr, read_len, pri_aln_flag, valid_match_flag, sr_chunk_flag = parse(line, matchFraction, matchIdentity, matchLength)
             
-            if not (pri_aln_flag and valid_match_flag and valid_acc_flag):
+            if not (pri_aln_flag and valid_match_flag):
                 continue
                 
             # Extract taxid from reference
@@ -791,6 +797,13 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
                 logging.debug(f"Malformed reference: {ref}")
                 continue  # Skip malformed references
             
+            # Skip if accession is in the exclusion list (if applicable)
+            if acc_list:
+                if (acc in acc_list and acc_list_action == 'exclude'):
+                    continue
+                elif (acc not in acc_list and acc_list_action == 'only'):
+                    continue
+
             # Check if we already know what qualified taxa this reference belongs to
             if ref_taxid in lineage_cache:
                 matching_taxids = lineage_cache[ref_taxid]
@@ -871,7 +884,7 @@ def seqReverseComplement(seq):
     seq_dict = { seq1[i]:seq1[i+16] for i in range(64) if i < 16 or 32<=i<48 }
     return "".join([seq_dict[base] for base in reversed(seq)])
 
-def group_refs_to_strains(r):
+def group_refs_to_strains(r, acc_list, acc_list_action):
     """
     Group reference mapping results by strains and calculate strain-level statistics.
     
@@ -882,7 +895,8 @@ def group_refs_to_strains(r):
     Parameters:
         r (dict): Dictionary with reference sequences as keys and mapping statistics
                  as values (output from process_sam_file)
-        
+        acc_list (list): List of accessions to consider (optional)
+        acc_list_action (str): Action to take for accessions in acc_list (optional)
     Returns:
         pandas.DataFrame: DataFrame with strain-level statistics
     """
@@ -892,6 +906,24 @@ def group_refs_to_strains(r):
     # retrieve sig fragment info
     r_df['RNAME'] = r_df['RNAME'].str.rstrip('|')
     r_df[['ACC','RSTART','REND','TAXID']] = r_df['RNAME'].str.split('|', expand=True)
+
+    # add reportable read count
+    r_df['RR'] = 0
+
+    if acc_list:
+        idx = r_df['ACC'].isin(acc_list)
+        r_df.loc[idx, 'RR'] = r_df.loc[idx, 'MR'] # report the read count for the reportable accessions
+
+        if acc_list_action == 'exclude':
+            r_df.loc[idx, ['MB', 'MR', 'NM', 'ID', 'SC', 'RL']] = 0 # set mapped bases, read count, mismatch and covered sig len to 0 for the reportable accessions
+        elif acc_list_action == 'only':
+            r_df = r_df[idx].reset_index(drop=True)
+
+        # if after applying the accession list filter, there is no valid mapping left, exit the program
+        if len(r_df) == 0:
+            logging.info(f"No valid mappings after applying accession list filter. Exiting.")
+            sys.exit(0)
+
     r_df['RSTART'] = r_df['RSTART'].astype(int)
     r_df['REND'] = r_df['REND'].astype(int)
     r_df['SLEN'] = r_df['REND']-r_df['RSTART']+1 # length of the signature fragment
@@ -904,7 +936,8 @@ def group_refs_to_strains(r):
         'ID':'sum', # of mismatches
         'SC':'sum', # covered signature length
         'SLEN':'sum', # length of this signature fragments (mapped)
-        'RL':'sum' # length of the reads
+        'RL':'sum', # length of the reads
+        'RR':'sum'  # reportable read count
     }).reset_index()
     # total length of signatures
     str_df['TS'] = str_df['TAXID'].map(df_stats['TotalLength'])
@@ -923,7 +956,8 @@ def group_refs_to_strains(r):
         "SLEN": "MAPPED_SIG_LEN", # length of the mapped signature fragments (entire fragment)
         "TS":   "TOTAL_SIG_LEN",
         "RD":   "DEPTH",
-        "bLC":  "BEST_SIG_COV"
+        "bLC":  "BEST_SIG_COV",
+        "RR":   "REPORTABLE_ACC_READ_COUNT"
     }, inplace=True)
 
     # check if TOTAL_SIG_LEN is 0, report the TAXID and exit
@@ -945,7 +979,7 @@ def group_refs_to_strains(r):
 
     return str_df
 
-def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, sni_score_strain, sni_score_cutoff, error_rate):
+def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, sni_score_strain, sni_score_cutoff, error_rate, acc_list=None, acc_list_action=None):
     """
     Aggregate strain-level results to higher taxonomic ranks.
     
@@ -971,6 +1005,9 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
         sni_score_cutoff (float): SNI-score cutoff for all levels
         sni_score_species (float): SNI-score cutoff for species level
         sni_score_strain (float): SNI-score cutoff for strain level
+        error_rate (float): Error rate for SNI-score inference
+        acc_list (list, optional): List of accessions to filter
+        acc_list_action (str, optional): Action to take with the accession list (e.g., "include" or "exclude")
         
     Returns:
         pandas.DataFrame: DataFrame with rolled-up taxonomy at all ranks
@@ -979,7 +1016,10 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
     major_ranks = {"superkingdom":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7,"strain":8}
 
     # agg signature fragments to strains
-    str_df = group_refs_to_strains(r)
+    str_df = group_refs_to_strains(r, acc_list, acc_list_action)
+    # total reads mapped to reportable accessions
+    total_reportable_read_count = str_df['REPORTABLE_ACC_READ_COUNT'].sum()
+
     # produce columns for the final report at each ranks
     rep_df = pd.DataFrame()
 
@@ -1036,6 +1076,7 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
                 'MAPPED_SIG_LEN': 'sum', 
                 'TOTAL_SIG_LEN': 'sum',
                 'DEPTH': 'sum', 
+                'REPORTABLE_ACC_READ_COUNT': 'sum', 
                 'BEST_SIG_COV': 'max', 
                 'ZSCORE': 'min',
                 'GENOMIC_CONTENT_EST': 'sum',
@@ -1118,7 +1159,7 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
 
     logging.debug(f'rep_df: {rep_df}')
 
-    return rep_df
+    return rep_df, total_reportable_read_count
 
 
 def infer_sni_score(df, error_rate):
@@ -1227,7 +1268,7 @@ def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
     cols = ['LEVEL', 'NAME', 'TAXID', 'READ_COUNT', 'TOTAL_BP_MAPPED',
             'SNI_SCORE', 'COVERED_SIG_LEN', 'BEST_SIG_COV', 'DEPTH', 'REL_ABUNDANCE_GC', 'REL_ABUNDANCE', # summary
             'PARENT_NAME', 'PARENT_TAXID', # parants
-            'TOTAL_READ_LEN', 'READ_IDT', 'TOTAL_BP_MISMATCH', 'TOTAL_BP_INDEL', 'SNI_NAIVE', 'SNI_CI95_LH', # read stats
+            'REPORTABLE_ACC_READ_COUNT', 'TOTAL_READ_LEN', 'READ_IDT', 'TOTAL_BP_MISMATCH', 'TOTAL_BP_INDEL', 'SNI_NAIVE', 'SNI_CI95_LH', # read stats
             'SIG_COV', 'MAPPED_SIG_LEN', 'TOTAL_SIG_LEN', 'COVERED_SIG_DEPTH', 'COVERED_MAPPED_SIG_COV', 'ZSCORE', # signature stats
             'GENOMIC_CONTENT_EST', 'ABUNDANCE', 'REL_ABUNDANCE_DEPTH', # abundance
             'SIG_LEVEL', 'GENOME_COUNT', 'GENOME_SIZE', 'NOTE' # ref genome
@@ -1484,14 +1525,14 @@ def remove_multiple_hits(samfile, samfile_temp):
     logging.info(f'Loading the sam file...')
 
     df = pd.read_csv(samfile,
-                sep='\t',
-                header=None,
-                usecols=[0, 1, 13],
-                names=['QNAME', 'FLAG', 'AS'],
-                converters={
-                    'AS': lambda x: x.replace('AS:i:', '')
-                },
-                dtype={'QNAME': 'str', 'FLAG': 'uint16'}
+                     sep='\t',
+                     header=None,
+                     usecols=[0, 1, 13],
+                     names=['QNAME', 'FLAG', 'AS'],
+                     converters={
+                         'AS': lambda x: x.replace('AS:i:', '')
+                     },
+                     dtype={'QNAME': 'str', 'FLAG': 'uint16'}
     )
 
     aln_count = len(df)
@@ -1533,7 +1574,7 @@ def remove_multiple_hits(samfile, samfile_temp):
 
         return True
 
-def load_excluded_acc_list(filepath):
+def load_acc_list(filepath):
     """
     Load a list of accession numbers to exclude from processing.
     
@@ -1547,16 +1588,16 @@ def load_excluded_acc_list(filepath):
         set: Set of accession numbers to exclude. Returns empty set if input file is empty.
         
     Example:
-        exclude_list = load_excluded_acc_list('exclude.txt')
+        exclude_list = load_acc_list('exclude.txt')
     """
     with open(filepath) as f:
-        excluded_acc_list = f.read().splitlines()
+        acc_list = f.read().splitlines()
 
-    if len(excluded_acc_list) == 0:
+    if len(acc_list) == 0:
         logging.warning(f"Exclude accession list is empty.")
         return set()
     else:
-        return set(excluded_acc_list)
+        return set(acc_list)
 
 def loadDatabaseStats(db_stats_file):
     """
@@ -1598,13 +1639,13 @@ def loadDatabaseStats(db_stats_file):
 
     # Set header to None to support files without headers
     df_stats = pd.read_csv(db_stats_file,
-                            low_memory=False,
-                            sep='\t',
-                            header=None,
-                            usecols=usecols,
-                            names=names,
-                            dtype={'DB_level': str, 'Taxid': str},
-                            index_col='Taxid')
+                           low_memory=False,
+                           sep='\t',
+                           header=None,
+                           usecols=usecols,
+                           names=names,
+                           dtype={'DB_level': str, 'Taxid': str},
+                           index_col='Taxid')
 
     # If 'Note' column is not present, create it with empty strings
     if not 'Note' in df_stats:
@@ -1759,15 +1800,15 @@ def main(args):
     global logfile
     global begin_t
     global df_stats
-    global excluded_acc_list
+    global acc_list
 
-    argvs = parse_params( __version__, args )
+    argvs = parse_args( __version__, args )
     begin_t  = time.time()
     sam_fp   = argvs.sam[0] if argvs.sam else ""
     samfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam" if not argvs.sam else sam_fp.name
     logfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.log"
     set_start_method("fork") # for default multiprocessing method
-    excluded_acc_list = set()
+    acc_list = set()
     split_read_flag = False
     res_df = pd.DataFrame() # aggregated restuls
 
@@ -1839,8 +1880,10 @@ def main(args):
         print_message( f"    Nanopore mode      : Enabled",              argvs.silent, begin_t, logfile )
     if argvs.errorRate >= 0.0:
         print_message( f"    Read error rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile )
-    if argvs.accExclusionList:
-        print_message( f"    Exclude accession  : {argvs.accExclusionList}", argvs.silent, begin_t, logfile )
+    if argvs.accList:
+        print_message( f"    Reportable acc list: {argvs.accList}", argvs.silent, begin_t, logfile )
+    if argvs.accList:
+        print_message( f"    Reportable acc action: {argvs.accListAction}", argvs.silent, begin_t, logfile )
     if argvs.extract:
         print_message( f"    Extract seqs       : {argvs.extract}",     argvs.silent, begin_t, logfile )
     if argvs.minCov > 0:
@@ -1886,10 +1929,10 @@ def main(args):
     print_message( f" - {df_stats.shape[0]} entries loaded.", argvs.silent, begin_t, logfile )
     print_message( f" - signatures at {df_stats['DB_level'].unique()} levels loaded.", argvs.silent, begin_t, logfile )
     
-    if argvs.accExclusionList:
-        print_message( "Loading excluded accession list...", argvs.silent, begin_t, logfile )
-        excluded_acc_list = load_excluded_acc_list(argvs.accExclusionList)
-        print_message( f" - {len(excluded_acc_list)} excluded accessions loaded.", argvs.silent, begin_t, logfile )
+    if argvs.accList:
+        print_message( "Loading reportable accession# list...", argvs.silent, begin_t, logfile )
+        acc_list = load_acc_list(argvs.accList)
+        print_message( f" - {len(acc_list)} reportable accessions loaded.", argvs.silent, begin_t, logfile )
 
     #main process
     if argvs.input:
@@ -1945,12 +1988,11 @@ def main(args):
     # processing SAM file and generate results
     if not argvs.extractOnly:
         print_message( "Processing SAM file...", argvs.silent, begin_t, logfile )
-        (res, mapped_r_cnt, tol_alignment_count, tol_invalid_match_count, tol_exclude_acc_count) = process_sam_file( os.path.abspath(samfile), argvs.threads, argvs.matchFraction, argvs.matchIdentity, argvs.matchLength, split_read_flag, excluded_acc_list)
-        print_message( f" - {tol_alignment_count} mapped reads processed", argvs.silent, begin_t, logfile )
-        print_message( f" - {tol_invalid_match_count} reads did not meet matching criteria", argvs.silent, begin_t, logfile )
-        print_message( f" - {tol_exclude_acc_count} reads mapped to the excluded accessions", argvs.silent, begin_t, logfile )
-        print_message( f" - {mapped_r_cnt} qualified mapped reads", argvs.silent, begin_t, logfile )
+        (res, mapped_r_cnt, tol_alignment_count, tol_invalid_match_count) = process_sam_file( os.path.abspath(samfile), argvs.threads, argvs.matchFraction, argvs.matchIdentity, argvs.matchLength, split_read_flag)
         gc.collect()
+
+        print_message( f" - {tol_alignment_count} mapped reads processed", argvs.silent, begin_t, logfile )
+        print_message( f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile )
 
         if mapped_r_cnt:
             # Set SNI-SCORE default to 0.8, species 0.95, strain 0.99
@@ -1962,18 +2004,24 @@ def main(args):
             (sni_score_cutoff, sni_score_species, sni_score_strain) = [float(x) for x in argvs.sniScore.split(',')]
 
             # aggregate the results
-            _params = (res, 
-                       argvs.relAbu, 
-                       argvs.dbLevel, 
-                       argvs.minCov, 
-                       argvs.minReads, 
-                       argvs.minLen, 
-                       argvs.maxZscore, 
-                       sni_score_species, 
-                       sni_score_strain, 
-                       sni_score_cutoff, 
-                       argvs.errorRate)
-            res_df = aggregate_taxonomy(*_params)
+            _args = (res, 
+                     argvs.relAbu, 
+                     argvs.dbLevel, 
+                     argvs.minCov, 
+                     argvs.minReads,
+                     argvs.minLen, 
+                     argvs.maxZscore, 
+                     sni_score_species, 
+                     sni_score_strain, 
+                     sni_score_cutoff, 
+                     argvs.errorRate,
+                     acc_list,
+                     argvs.accListAction)
+            res_df, total_reportable_read_count = aggregate_taxonomy(*_args)
+            
+            if acc_list:
+                print_message( f" - {total_reportable_read_count} reads mapped to reportable accessions", argvs.silent, begin_t, logfile )
+            print_message( f" - {mapped_r_cnt} qualified mapped reads", argvs.silent, begin_t, logfile )
             print_message( "Done taxonomy aggregation.", argvs.silent, begin_t, logfile )
 
             if not len(res_df):
@@ -2032,7 +2080,7 @@ def main(args):
             # Extract FASTA sequences based on the taxonomy entries
             print_message(f"Extracting up to {max_per_taxon} {out_format} sequences per taxon...", argvs.silent, begin_t, logfile)
 
-            _params = (os.path.abspath(samfile), 
+            _args = (os.path.abspath(samfile), 
                        taxa_dict, 
                        qualified_taxids,
                        out_fp, 
@@ -2041,9 +2089,10 @@ def main(args):
                        argvs.matchIdentity, 
                        argvs.matchLength, 
                        max_per_taxon, 
-                       excluded_acc_list, 
+                       acc_list,
+                       argvs.accListAction,
                        out_format)
-            taxon_count, seq_count = extract_sequences_by_taxonomy(*_params)
+            taxon_count, seq_count = extract_sequences_by_taxonomy(*_args)
             print_message(f"Done extracting {seq_count} sequences from {taxon_count} taxa to '{outfile}'.", 
                             argvs.silent, begin_t, logfile)
 
