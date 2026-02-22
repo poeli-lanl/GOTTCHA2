@@ -146,10 +146,14 @@ def parse_args(ver, args):
                     help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -ss 0,0,0]")
 
     p.add_argument( '-a','--accList', metavar='[FILE]', required=False, type=str,
-                    help="A file of list with accessions of interested (e.g. plasmid accessions).")
+                    help="A file of list with accessions of interest (e.g. plasmid accessions).")
 
     p.add_argument( '-aa','--accListAction', choices=['exclude', 'only', 'report'], default='report', type=str,
-                    help="Action to take with the reads aligned to the reference on the accession list.  [default: report]")
+                    help=("Action for aligned reads mapping to the accession list. "
+                          "exclude: discard reads matching accessions of interest in the list. "
+                          "only: output only reads matching accessions of interest in the list. "
+                          "report: do not filter; report reads matching accessions of interest in the list (AOI_READ_COUNT). "
+                          "[default: report]"))
 
     p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
                     help="The multiple hit removal step is automatically enabled for sequence input files and disabled for SAM files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
@@ -358,7 +362,7 @@ def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity, matchL
         dict: Dictionary with reference sequences as keys and mapping statistics as values
         int: Number of lines processed in this chunk
         int: Number of invalid matches found
-        int: Number of reportable accessions found
+        int: Number of accession#s of interest found
     """
     # processing alignments in SAM format
     f = open( filename )
@@ -579,7 +583,7 @@ def process_sam_file(sam_fn, numthreads, matchFraction, matchIdentity, matchLeng
             mapped_reads (int): Total number of reads that mapped
             tol_alignment_count (int): Total number of alignments processed
             tol_invalid_match_count (int): Total number of invalid matches found
-            tol_reportable_acc_count (int): Total number of reportable accessions found
+            tol_reportable_acc_count (int): Total number of accession#s of interest found
         )
     """
     result = gt._autoVivification()
@@ -798,11 +802,15 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
                 continue  # Skip malformed references
             
             # Skip if accession is in the exclusion list (if applicable)
+            aoi_flag = False
             if acc_list:
-                if (acc in acc_list and acc_list_action == 'exclude'):
-                    continue
-                elif (acc not in acc_list and acc_list_action == 'only'):
-                    continue
+                if acc in acc_list:
+                    aoi_flag = True
+                    if acc_list_action == 'exclude':
+                        continue
+                else:
+                    if acc_list_action == 'only':
+                        continue
 
             # Check if we already know what qualified taxa this reference belongs to
             if ref_taxid in lineage_cache:
@@ -856,9 +864,9 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
                             mate = '.2'
 
                     if format == 'fasta':
-                        fasta_entry = f">{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid}\n{seq_to_use}\n"
+                        fasta_entry = f">{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag}\n{seq_to_use}\n"
                     else:
-                        fasta_entry = f"@{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid}\n{seq_to_use}\n+\n{rq}\n"
+                        fasta_entry = f"@{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag}\n{seq_to_use}\n+\n{rq}\n"
                     taxon_seqs[taxid].append(fasta_entry)
         except Exception as e:
             # Skip problematic lines
@@ -912,10 +920,10 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
 
     if acc_list:
         idx = r_df['ACC'].isin(acc_list)
-        r_df.loc[idx, 'RR'] = r_df.loc[idx, 'MR'] # report the read count for the reportable accessions
+        r_df.loc[idx, 'RR'] = r_df.loc[idx, 'MR'] # report the read count for the accession#s of interest
 
         if acc_list_action == 'exclude':
-            r_df.loc[idx, ['MB', 'MR', 'NM', 'ID', 'SC', 'RL']] = 0 # set mapped bases, read count, mismatch and covered sig len to 0 for the reportable accessions
+            r_df.loc[idx, ['MB', 'MR', 'NM', 'ID', 'SC', 'RL']] = 0 # set mapped bases, read count, mismatch and covered sig len to 0 for the accession#s of interest
         elif acc_list_action == 'only':
             r_df = r_df[idx].reset_index(drop=True)
 
@@ -957,7 +965,7 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
         "TS":   "TOTAL_SIG_LEN",
         "RD":   "DEPTH",
         "bLC":  "BEST_SIG_COV",
-        "RR":   "REPORTABLE_ACC_READ_COUNT"
+        "RR":   "AOI_READ_COUNT"
     }, inplace=True)
 
     # check if TOTAL_SIG_LEN is 0, report the TAXID and exit
@@ -1017,8 +1025,8 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
 
     # agg signature fragments to strains
     str_df = group_refs_to_strains(r, acc_list, acc_list_action)
-    # total reads mapped to reportable accessions
-    total_reportable_read_count = str_df['REPORTABLE_ACC_READ_COUNT'].sum()
+    # total reads mapped to accession#s of interest
+    total_reportable_read_count = str_df['AOI_READ_COUNT'].sum()
 
     # produce columns for the final report at each ranks
     rep_df = pd.DataFrame()
@@ -1076,7 +1084,7 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
                 'MAPPED_SIG_LEN': 'sum', 
                 'TOTAL_SIG_LEN': 'sum',
                 'DEPTH': 'sum', 
-                'REPORTABLE_ACC_READ_COUNT': 'sum', 
+                'AOI_READ_COUNT': 'sum', 
                 'BEST_SIG_COV': 'max', 
                 'ZSCORE': 'min',
                 'GENOMIC_CONTENT_EST': 'sum',
@@ -1165,7 +1173,6 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
 def infer_sni_score(df, error_rate):
     """
     Estimate the Average Nucleotide Identity (SNI-score) together with 95% confidence intervals:
-    - removes the expected 0.5 % sequencing-error penalty
     - widens the interval when only a fraction of the signature space is actually covered ( SIG_COV )
     - project mismatches onto those unique positions
     - automatically becomes narrower as more signature bases are covered    
@@ -1179,27 +1186,26 @@ def infer_sni_score(df, error_rate):
 
     # use only unique covered signature bases
     n = df["COVERED_SIG_LEN"]
+    cov = df["SIG_COV"].clip(lower=1e-12)  # avoid n_eff = 0
     
     # remove the expected 0.5 % sequencing-error penalty
     m_rate = (df["TOTAL_BP_MISMATCH"]/df["TOTAL_BP_MAPPED"])
-    m_rate = m_rate.clip(lower=1e-12)  # avoid negative values
-
-    m_rate_adj = df["TOTAL_BP_MISMATCH"]/df["TOTAL_BP_MAPPED"] - error_rate
+    m_rate_adj = m_rate - error_rate
     m_rate_adj = m_rate_adj.clip(lower=1e-12)  # avoid negative values
 
     # observed SCORE
     p_hat = 1 - m_rate_adj
     p = 1 - m_rate
 
-    # down-weight poor coverage
-    cov    = df["SIG_COV"].clip(lower=1e-12)  # avoid n_eff = 0
-    n_eff  = df["COVERED_SIG_LEN"] * cov      # down-weight poor coverage
+    # cov is the coverage of the signature space, used to widen the confidence interval when only a fraction of the signature is covered
+    n_eff  = n * cov
     
     z2     = z ** 2
-    center = (p_hat + z2 / (2 * n_eff)) / (1 + z2 / n_eff)
+    denom  = 1 + z2 / n_eff
+    center = (p_hat + z2 / (2 * n_eff)) / denom
     hw     = (z * np.sqrt(
                 (p_hat * (1 - p_hat)) / n_eff + z2 / (4 * n_eff ** 2)
-             ) / (1 + z2 / n_eff))
+             ) / denom)
     
     # observed-identity CI
     id_low, id_high = center - hw, center + hw
@@ -1268,7 +1274,7 @@ def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
     cols = ['LEVEL', 'NAME', 'TAXID', 'READ_COUNT', 'TOTAL_BP_MAPPED',
             'SNI_SCORE', 'COVERED_SIG_LEN', 'BEST_SIG_COV', 'DEPTH', 'REL_ABUNDANCE_GC', 'REL_ABUNDANCE', # summary
             'PARENT_NAME', 'PARENT_TAXID', # parants
-            'REPORTABLE_ACC_READ_COUNT', 'TOTAL_READ_LEN', 'READ_IDT', 'TOTAL_BP_MISMATCH', 'TOTAL_BP_INDEL', 'SNI_NAIVE', 'SNI_CI95_LH', # read stats
+            'AOI_READ_COUNT', 'TOTAL_READ_LEN', 'READ_IDT', 'TOTAL_BP_MISMATCH', 'TOTAL_BP_INDEL', 'SNI_NAIVE', 'SNI_CI95_LH', # read stats
             'SIG_COV', 'MAPPED_SIG_LEN', 'TOTAL_SIG_LEN', 'COVERED_SIG_DEPTH', 'COVERED_MAPPED_SIG_COV', 'ZSCORE', # signature stats
             'GENOMIC_CONTENT_EST', 'ABUNDANCE', 'REL_ABUNDANCE_DEPTH', # abundance
             'SIG_LEVEL', 'GENOME_COUNT', 'GENOME_SIZE', 'NOTE' # ref genome
@@ -1930,9 +1936,9 @@ def main(args):
     print_message( f" - signatures at {df_stats['DB_level'].unique()} levels loaded.", argvs.silent, begin_t, logfile )
     
     if argvs.accList:
-        print_message( "Loading reportable accession# list...", argvs.silent, begin_t, logfile )
+        print_message( "Loading accession#s of interest list...", argvs.silent, begin_t, logfile )
         acc_list = load_acc_list(argvs.accList)
-        print_message( f" - {len(acc_list)} reportable accessions loaded.", argvs.silent, begin_t, logfile )
+        print_message( f" - {len(acc_list)} accession#s of interest loaded.", argvs.silent, begin_t, logfile )
 
     #main process
     if argvs.input:
@@ -2020,7 +2026,7 @@ def main(args):
             res_df, total_reportable_read_count = aggregate_taxonomy(*_args)
             
             if acc_list:
-                print_message( f" - {total_reportable_read_count} reads mapped to reportable accessions", argvs.silent, begin_t, logfile )
+                print_message( f" - {total_reportable_read_count} reads mapped to accession#s of interest", argvs.silent, begin_t, logfile )
             print_message( f" - {mapped_r_cnt} qualified mapped reads", argvs.silent, begin_t, logfile )
             print_message( "Done taxonomy aggregation.", argvs.silent, begin_t, logfile )
 
