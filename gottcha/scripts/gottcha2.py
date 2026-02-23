@@ -431,7 +431,7 @@ def parse(line, matchFraction, matchIdentity, matchLength):
             flag (str): SAM flag,
             cigar (str): CIGAR string,
             primary_alignment_flag (bool): Whether this is a primary alignment,
-            valid_match_flag: whether this alignment meets match criteria,
+            valid_match_flag (bool): Whether this alignment meets match criteria,
             sr_chunk_flag (bool): Whether this is a chunked read
         )
     
@@ -863,10 +863,15 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
                         elif int(flag) & 128:
                             mate = '.2'
 
+                    mapping_len = region[1] - region[0] + 1
+                    ref_len = int(rend) - int(rstart) + 1
+                    mapping_idt = 1 - (nm + nid) / mapping_len
+                    mapping_frac = max(mapping_len/read_len, mapping_len/ref_len)
+
                     if format == 'fasta':
-                        fasta_entry = f">{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag}\n{seq_to_use}\n"
+                        fasta_entry = f">{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag} MG={mapping_len} MI={mapping_idt:.2f} MF={mapping_frac:.2f}\n{seq_to_use}\n"
                     else:
-                        fasta_entry = f"@{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag}\n{seq_to_use}\n+\n{rq}\n"
+                        fasta_entry = f"@{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag} MG={mapping_len} MI={mapping_idt:.2f} MF={mapping_frac:.2f}\n{seq_to_use}\n+\n{rq}\n"
                     taxon_seqs[taxid].append(fasta_entry)
         except Exception as e:
             # Skip problematic lines
