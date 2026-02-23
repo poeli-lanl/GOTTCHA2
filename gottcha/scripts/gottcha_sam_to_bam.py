@@ -6,6 +6,7 @@ import sys
 import os
 import subprocess
 import tempfile
+import logging
 from typing import Dict, Set
 
 def convert_sam_to_bam(input_sam: str, output_bam: str, threads=4, quiet=False) -> None:
@@ -17,14 +18,14 @@ def convert_sam_to_bam(input_sam: str, output_bam: str, threads=4, quiet=False) 
         refs_file = os.path.join(temp_dir, "refs.txt")
         header_file = os.path.join(temp_dir, "header.sam")
         
-        print(f"Extracting references from {input_sam}...")
+        logging.info(f"Extracting references from {input_sam}...")
         with open(refs_file, 'w') as out:
             # Stream through file with grep/awk for better performance
             # Extract both reference (column 3) and mate reference (column 7)
             cmd = f"awk '!(/^@/) {{ print $3; if ($7 != \"=\") print $7 }}' {input_sam} | sort -u"
             subprocess.run(cmd, shell=True, stdout=out, check=True)
             
-        print("Creating header file...")
+        logging.info("Creating header file...")
         with open(header_file, 'w') as out:
             out.write("@HD\tVN:1.0\tSO:coordinate\n")
             with open(refs_file) as f:
@@ -36,7 +37,7 @@ def convert_sam_to_bam(input_sam: str, output_bam: str, threads=4, quiet=False) 
 
         # Step 2: Create temp BAM with header
         temp_bam = os.path.join(temp_dir, "temp.bam")
-        print("Converting to BAM...")
+        logging.info("Converting to BAM...")
         
         # Use samtools directly for better performance
         cmd = f"cat {header_file} {input_sam} | samtools view -b -@ {threads} -o {temp_bam}"
@@ -45,23 +46,23 @@ def convert_sam_to_bam(input_sam: str, output_bam: str, threads=4, quiet=False) 
         subprocess.run(cmd, shell=True, check=True)
         
         # Step 3: Sort BAM (with threads)
-        print("Sorting BAM file...")
+        logging.info("Sorting BAM file...")
         cmd = f"samtools sort -@ {threads} -o {output_bam} {temp_bam}"
         if quiet:
             cmd += " 2>/dev/null"
         subprocess.run(cmd, shell=True, check=True)
         
         # Step 4: Index BAM
-        print("Creating BAM index...")
+        logging.info("Creating BAM index...")
         try:
             if quiet:
                 subprocess.run(f"samtools index {output_bam} 2>/dev/null", shell=True, check=True)
             else:
                 pysam.index(output_bam)
         except Exception as e:
-            print(f"Warning: Could not create index: {e}", file=sys.stderr)
+            logging.info(f"Warning: Could not create index: {e}", file=sys.stderr)
         
-    print(f"Conversion complete: {output_bam}")
+    logging.info(f"Conversion complete: {output_bam}")
 
 def main():
     parser = argparse.ArgumentParser(description="Convert SAM to sorted BAM - optimized for large files")
@@ -79,7 +80,7 @@ def main():
     try:
         convert_sam_to_bam(args.input, args.output, args.threads, args.quiet)
     except Exception as e:
-        print(f"Error converting file: {e}", file=sys.stderr)
+        logging.info(f"Error converting file: {e}", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":

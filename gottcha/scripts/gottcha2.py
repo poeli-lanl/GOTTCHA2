@@ -150,9 +150,9 @@ def parse_args(ver, args):
 
     p.add_argument( '-aa','--accListAction', choices=['exclude', 'only', 'report'], default='report', type=str,
                     help=("Action for aligned reads mapping to the accession list. "
-                          "exclude: discard reads matching accessions of interest in the list. "
-                          "only: output only reads matching accessions of interest in the list. "
-                          "report: do not filter; report reads matching accessions of interest in the list (AOI_READ_COUNT). "
+                          "'exclude': discard reads matching accessions of interest in the list. "
+                          "'only': output only reads matching accessions of interest in the list. "
+                          "'report': do not filter; report reads matching accessions of interest in the list (AOI_READ_COUNT). "
                           "[default: report]"))
 
     p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
@@ -431,8 +431,8 @@ def parse(line, matchFraction, matchIdentity, matchLength):
             flag (str): SAM flag,
             cigar (str): CIGAR string,
             primary_alignment_flag (bool): Whether this is a primary alignment,
-            valid_match_flag: whether this alignment meets match criteria
-
+            valid_match_flag: whether this alignment meets match criteria,
+            sr_chunk_flag (bool): Whether this is a chunked read
         )
     
     Example:
@@ -767,8 +767,8 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
         matchFraction (float): Minimum fraction required for a valid match
         matchIdentity (float): Minimum identity required for a valid match
         max_per_taxon (int): Maximum sequences to extract per taxon
-        acc_list (list, optional): List of accessions to filter
-        acc_list_action (str, optional): Action to take with the accession list (e.g., "include" or "exclude")
+        acc_list (list, optional): List of accessions of interest
+        acc_list_action (str, optional): Action to take with the accession list (e.g., "exclude")
         format (str): Output format ('fasta' or 'fastq')
         
     Returns:
@@ -903,8 +903,8 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
     Parameters:
         r (dict): Dictionary with reference sequences as keys and mapping statistics
                  as values (output from process_sam_file)
-        acc_list (list): List of accessions to consider (optional)
-        acc_list_action (str): Action to take for accessions in acc_list (optional)
+        acc_list (list, optional): List of accessions of interest
+        acc_list_action (str, optional): Action to take with the accession list (e.g., "exclude")
     Returns:
         pandas.DataFrame: DataFrame with strain-level statistics
     """
@@ -919,7 +919,7 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
     r_df['RR'] = 0
 
     if acc_list:
-        idx = r_df['ACC'].isin(acc_list)
+        idx = r_df['ACC'].isin(acc_list) | r_df['RNAME'].isin(acc_list)
         r_df.loc[idx, 'RR'] = r_df.loc[idx, 'MR'] # report the read count for the accession#s of interest
 
         if acc_list_action == 'exclude':
@@ -941,7 +941,7 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
         'MB':'sum', # of mapped bases
         'MR':'sum', # of mapped reads
         'NM':'sum', # of mismatches
-        'ID':'sum', # of mismatches
+        'ID':'sum', # of indels
         'SC':'sum', # covered signature length
         'SLEN':'sum', # length of this signature fragments (mapped)
         'RL':'sum', # length of the reads

@@ -10,8 +10,6 @@ import argparse
 import json
 from gottcha import GOTTCHA_DB_LATEST, FILE_NAME
 
-
-
 def parse_params(args):
     parser = argparse.ArgumentParser(prog='pull_database.py', description="""This script will pull the latest version of the Gottcha2 database.""")
 
