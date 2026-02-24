@@ -118,8 +118,8 @@ def parse_args(ver, args):
     p.add_argument( '--m2options', metavar='<STR>', type=str, required=False, default='auto',
                     help="The minimap2 mapping options for short reads. Do not use this option unless you know what you are doing. [default: 'auto']")
 
-    p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float, default=0.95,
-                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0.95]")
+    p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float,
+                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0.95 for short reads, 0.9 for nanopore reads]")
 
     p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0.99,
                     help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0.99]")
@@ -277,6 +277,17 @@ def parse_args(ver, args):
 
     if args_parsed.m2options == 'auto':
         args_parsed.m2options = '-s60'
+
+    if args_parsed.matchIdentity:
+        if args_parsed.matchIdentity < 0 or args_parsed.matchIdentity > 1:
+            p.error( '--matchIdentity must be between 0 and 1.' )
+    
+    if args_parsed.matchIdentity is None:
+         if args_parsed.nanopore:
+            args_parsed.matchIdentity = 0.85
+            args_parsed.matchFraction = 0
+         else:
+            args_parsed.matchIdentity = 0.95
 
     if not args_parsed.errorRate:
         if args_parsed.nanopore:
