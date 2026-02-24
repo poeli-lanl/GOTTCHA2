@@ -2014,7 +2014,7 @@ def main(args):
         (res, mapped_r_cnt, tol_alignment_count, tol_invalid_match_count) = process_sam_file( os.path.abspath(samfile), argvs.threads, argvs.matchFraction, argvs.matchIdentity, argvs.matchLength, split_read_flag)
         gc.collect()
 
-        print_message( f" - {tol_alignment_count} mapped reads processed", argvs.silent, begin_t, logfile )
+        print_message( f" - {tol_alignment_count} alignments processed", argvs.silent, begin_t, logfile )
         print_message( f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile )
 
         if mapped_r_cnt:
