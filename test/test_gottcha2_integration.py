@@ -54,15 +54,19 @@ class TestGottcha2Integration(unittest.TestCase):
                 'REGIONS': [(11, 20), (21, 30)],
                 'MB': 20,
                 'MR': 2,
-                'NM': 0
+                'NM': 0,
+                'ID': 0,
+                'RL': 34
             },
             'XYZ|1|100|67890': {
                 'REGIONS': [(31, 40)],
                 'MB': 10,
                 'MR': 1,
-                'NM': 0
+                'NM': 0,
+                'ID': 0,
+                'RL': 17
             }
-        }, 3, 0, 0)  # Return tuple matching updated function signature
+        }, 3, 0)  # Return tuple matching current worker signature
         
         mock_job.get.return_value = mock_result
         
@@ -74,7 +78,7 @@ class TestGottcha2Integration(unittest.TestCase):
         gottcha2.logfile = os.path.join(self.test_dir, "test.log")
         
         # Run the function
-        result, mapped_reads, tol_alignment_count, tol_invalid_match_count, tol_exclude_acc_count = gottcha2.process_sam_file(self.sam_file, 1, 0.5)
+        result, mapped_reads, tol_alignment_count, tol_invalid_match_count = gottcha2.process_sam_file(self.sam_file, 1, 0.5, 0, 0)
         
         # Check the results
         self.assertEqual(mapped_reads, 3)  # 2 + 1 from the mocked data
@@ -83,42 +87,25 @@ class TestGottcha2Integration(unittest.TestCase):
         self.assertEqual(result['XYZ|1|100|67890']['SC'], 10)
         self.assertEqual(tol_alignment_count, 3)
         self.assertEqual(tol_invalid_match_count, 0)
-        self.assertEqual(tol_exclude_acc_count, 0)
 
-    @patch('gottcha.scripts.gottcha2.pd.DataFrame')
-    @patch('gottcha.scripts.gottcha2.logging.fatal')
-    @patch('gottcha.scripts.gottcha2.sys.exit')
-    def test_group_refs_to_strains(self, mock_exit, mock_fatal, mock_df):
+    def test_group_refs_to_strains(self):
         """Test grouping references by strain."""
-        # Mock the pandas operations
-        mock_df.from_dict.return_value = mock_df
-        mock_df.rename.return_value = mock_df
-        mock_df.str.rstrip.return_value = mock_df
-        mock_df.str.split.return_value.expand = True
-        
-        # Create a mock Series for eq(0).any() check to return False
-        mock_series = MagicMock()
-        mock_series.eq.return_value.any.return_value = False
-        mock_df.__getitem__.return_value = mock_series
-        
-        # Set up a mock database stats with the indexes set properly
+        # Set up mock database stats with required columns/index
         gottcha2.df_stats = pd.DataFrame([
-            ['species', '12345', 1000, 10000],
-            ['species', '67890', 500, 5000]
-        ], columns=['DB_level', 'Taxid', 'TotalLength', 'GenomeSize'])
+            ['species', '12345', 1000, 10000, ''],
+            ['species', '67890', 500, 5000, '']
+        ], columns=['DB_level', 'Taxid', 'TotalLength', 'GenomeSize', 'Note'])
         gottcha2.df_stats.set_index('Taxid', inplace=True)
         
         # Test the function with mock data
         test_data = {
-            'ABC|1|100|12345': {'MB': 100, 'MR': 10, 'NM': 2, 'SC': 50},
-            'XYZ|1|100|67890': {'MB': 50, 'MR': 5, 'NM': 1, 'SC': 25}
+            'ABC|1|100|12345': {'MB': 100, 'MR': 10, 'NM': 2, 'ID': 1, 'SC': 50, 'RL': 200},
+            'XYZ|1|100|67890': {'MB': 50, 'MR': 5, 'NM': 1, 'ID': 0, 'SC': 25, 'RL': 100}
         }
         
-        # Call the function (will use mocked pandas operations)
-        gottcha2.group_refs_to_strains(test_data)
-        
-        # Verify the expected pandas calls were made
-        mock_df.from_dict.assert_called_once()
+        str_df = gottcha2.group_refs_to_strains(test_data, None, 'report')
+        self.assertEqual(len(str_df), 2)
+        self.assertTrue({'TAXID', 'TOTAL_BP_MAPPED', 'TOTAL_BP_INDEL', 'AOI_READ_COUNT'}.issubset(str_df.columns))
 
     def test_taxid_file_input(self):
         """Test extracting reads using taxids from a file."""
@@ -177,7 +164,7 @@ class TestGottcha2Integration(unittest.TestCase):
             self.assertEqual(len(qualified_taxids4), 2)
             self.assertListEqual(sorted(qualified_taxids4), ['12345', '67890'])
 
-    def test_load_excluded_acc_list(self):
+    def test_load_acc_list(self):
         """Test loading accession list to exclude."""
         # Create a temporary file with accessions
         acc_file = os.path.join(self.test_dir, "exclude_acc.txt")
@@ -185,7 +172,7 @@ class TestGottcha2Integration(unittest.TestCase):
             f.write("ABC\nXYZ\nPQR\n")
         
         # Test loading the file
-        exclude_set = gottcha2.load_excluded_acc_list(acc_file)
+        exclude_set = gottcha2.load_acc_list(acc_file)
         
         self.assertEqual(len(exclude_set), 3)
         self.assertIn("ABC", exclude_set)
@@ -198,33 +185,31 @@ class TestGottcha2Integration(unittest.TestCase):
             pass
             
         with self.assertLogs(level='WARNING'):
-            empty_set = gottcha2.load_excluded_acc_list(empty_file)
+            empty_set = gottcha2.load_acc_list(empty_file)
                 
         self.assertEqual(len(empty_set), 0)
 
     def test_exclude_accessions_in_parse(self):
-        """Test that parse() correctly excludes accessions."""
+        """Test parse() output fields and validity flags."""
         # Create SAM line with accession ABC
         sam_line = "read1\t0\tABC|1|100|12345\t11\t60\t5S10M3S\t*\t0\t0\tGGGGGCCCCCCCCCGGG\tHHHHHHHHHHHHHHHHH\tNM:i:0\tAS:i:10\tXS:i:0\tZC:i:1"
         
-        # Test without exclusion
-        _, _, _, _, _, _, _, _, _, _, _, valid_match_flag1, valid_acc_flag1, zc_flag = gottcha2.parse(sam_line, 0.5)
+        # Current parse signature: (line, matchFraction, matchIdentity, matchLength)
+        _, region1, _, _, _, _, _, _, _, _, _, valid_match_flag1, zc_flag = gottcha2.parse(sam_line, 0.5, 0.0, 0)
         self.assertTrue(valid_match_flag1)
-        self.assertTrue(valid_acc_flag1)
         self.assertTrue(zc_flag)
+        self.assertEqual(region1, (11, 20))
         
-        # Test with exclusion
-        exclude_set = {"ABC"}
-        _, _, _, _, _, _, _, _, _, _, _, valid_match_flag2, valid_acc_flag2, zc_flag2 = gottcha2.parse(sam_line, 0.5, 0, 0, exclude_set)
-        self.assertTrue(valid_match_flag2)
-        self.assertFalse(valid_acc_flag2)
+        # Higher required match fraction should invalidate this alignment
+        _, _, _, _, _, _, _, _, _, _, _, valid_match_flag2, zc_flag2 = gottcha2.parse(sam_line, 0.95, 0.0, 0)
+        self.assertFalse(valid_match_flag2)
         self.assertTrue(zc_flag2)
         
-        # Test with a different accession that's not excluded
+        # Test with a different accession and no split-read chunk tag
         sam_line2 = "read3\t0\tDEF|1|100|67890\t11\t60\t5S10M3S\t*\t0\t0\tGGGGGCCCCCCCCCGGG\tHHHHHHHHHHHHHHHHH\tNM:i:0\tAS:i:10\tXS:i:0"
-        _, _, _, _, _, _, _, _, _, _, _, valid_match_flag3, valid_acc_flag3, zc_flag3 = gottcha2.parse(sam_line2, 0.5, 0, 0, exclude_set)
+        _, region3, _, _, _, _, _, _, _, _, _, valid_match_flag3, zc_flag3 = gottcha2.parse(sam_line2, 0.5, 0.0, 0)
+        self.assertEqual(region3, (11, 20))
         self.assertTrue(valid_match_flag3)
-        self.assertTrue(valid_acc_flag3)
         self.assertFalse(zc_flag3)
 
     def test_worker_with_excluded_acc_list(self):
@@ -237,84 +222,13 @@ class TestGottcha2Integration(unittest.TestCase):
             f.write("read3\t0\tDEF|1|100|54321\t31\t60\t5S10M3S\t*\t0\t0\tGGGGGCCCCCCCCCGGG\tHHHHHHHHHHHHHHHHH\tNM:i:0\tAS:i:10\tXS:i:0\n")
 
         # Test without exclusion
-        result_no_exclude, lines_count1, invalid_match_count1, exclude_acc_count1 = gottcha2.worker(test_sam, 0, os.path.getsize(test_sam), 0.5)
+        result_no_exclude, lines_count1, invalid_match_count1 = gottcha2.worker(test_sam, 0, os.path.getsize(test_sam), 0.5, 0, 0, False)
         self.assertEqual(len(result_no_exclude), 3)
         self.assertIn("ABC|1|100|12345", result_no_exclude)
         self.assertIn("XYZ|1|100|67890", result_no_exclude)
         self.assertIn("DEF|1|100|54321", result_no_exclude)
         self.assertEqual(lines_count1, 3)
         self.assertEqual(invalid_match_count1, 0)
-        self.assertEqual(exclude_acc_count1, 0)
-        
-        # Test with exclusion
-        exclude_set = {"ABC", "XYZ"}
-        result_with_exclude, lines_count2, invalid_match_count2, exclude_acc_count2 = gottcha2.worker(test_sam, 0, os.path.getsize(test_sam), 0.5, 0, 0, False, exclude_set)
-        self.assertEqual(len(result_with_exclude), 1)
-        self.assertNotIn("ABC|1|100|12345", result_with_exclude)
-        self.assertNotIn("XYZ|1|100|67890", result_with_exclude)
-        self.assertIn("DEF|1|100|54321", result_with_exclude)
-        self.assertEqual(lines_count2, 3)
-        self.assertEqual(invalid_match_count2, 0)
-        self.assertEqual(exclude_acc_count2, 2)  # Two accessions excluded
-
-    @patch('gottcha.scripts.gottcha2.Pool')
-    @patch('gottcha.scripts.gottcha2.print_message')
-    def test_process_sam_with_exclude_list(self, mock_print, mock_pool):
-        """Test processing SAM file with exclude accession list."""
-        # Set up mocks
-        mock_job = MagicMock()
-        mock_pool.return_value.apply_async.return_value = mock_job
-        
-        # Create result with one accession excluded - matching the updated return signature
-        mock_result = ({
-            'DEF|1|100|54321': {
-                'REGIONS': [(31, 40)],
-                'MB': 10,
-                'MR': 1,
-                'NM': 0
-            }
-        }, 3, 0, 2)  # Third value is now exclude_acc_count
-        
-        mock_job.get.return_value = mock_result
-        
-        # Create a temporary accession list file
-        acc_file = os.path.join(self.test_dir, "exclude_acc.txt")
-        with open(acc_file, 'w') as f:
-            f.write("ABC\nXYZ\n")
-        
-        # Set up gottcha2 global variables
-        gottcha2.argvs = MagicMock()
-        gottcha2.argvs.debug = False
-        gottcha2.argvs.silent = True
-        gottcha2.begin_t = 0
-        gottcha2.logfile = os.path.join(self.test_dir, "test.log")
-        
-        # Load exclusion list and run the function
-        exclude_set = gottcha2.load_excluded_acc_list(acc_file)
-            
-        result, mapped_reads, tol_alignment_count, tol_invalid_match_count, tol_exclude_acc_count = gottcha2.process_sam_file(
-            self.sam_file, 1, 0.5, 0, 0, False, exclude_set
-        )
-        
-        # Check the results
-        mock_pool.return_value.apply_async.assert_called_with(
-            gottcha2.worker, 
-                (self.sam_file, 
-                 mock_pool.return_value.apply_async.call_args[0][1][1], 
-                 mock_pool.return_value.apply_async.call_args[0][1][2], 
-                 0.5, 
-                 0, 
-                 0, 
-                 False, 
-                 exclude_set)
-        )
-        
-        # Only one reference should be in the result
-        self.assertEqual(len(result), 1)
-        self.assertIn('DEF|1|100|54321', result)
-        self.assertEqual(tol_alignment_count, 3)
-        self.assertEqual(tol_invalid_match_count, 0)
-        self.assertEqual(tol_exclude_acc_count, 2)  # Two accessions excluded
 
 if __name__ == '__main__':
     unittest.main()

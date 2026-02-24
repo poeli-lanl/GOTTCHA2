@@ -32,6 +32,7 @@ dependencies = [
   "pandas>=1.2.0",
   "requests>=2.25.0",
   "biom-format>=2.1.7",
+  "pysam>=0.22.0",
   "tqdm",
 ]
 dynamic = ["version"]

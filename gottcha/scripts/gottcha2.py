@@ -2,7 +2,7 @@
 
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", "Anna Chernikov", "Jason Gans", "Tracey Freites", "Patrick Chain"]
-__version__   = "2.2.1"
+__version__   = "2.2.2"
 
 import argparse as ap
 import sys, os, time, subprocess
@@ -118,41 +118,41 @@ def parse_args(ver, args):
     p.add_argument( '--m2options', metavar='<STR>', type=str, required=False, default='auto',
                     help="The minimap2 mapping options for short reads. Do not use this option unless you know what you are doing. [default: 'auto']")
 
-    p.add_argument( '-mc','--minCov', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum signature coverage to be considered valid in abundance calculation. [default: 0]")
+    p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float,
+                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0.95 for short reads, 0.9 for nanopore reads]")
 
-    p.add_argument( '-mr','--minReads', metavar='<INT>', type=int, default=0,
-                    help="Minimum number of reads to be considered valid in abundance calculation. [default: 0]")
+    p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0.99,
+                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0.99]")
 
-    p.add_argument( '-ml','--minLen', metavar='<INT>', type=int, default=0,
-                    help="Minimum signature length to be considered valid in abundance calculation. [default: 0]")
-
-    p.add_argument( '-mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
-                    help="Maximum estimated z-score for the depths of the mapped region. Set to 0 to disable. [default: 0]")
-
-    p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0]")
-
-    p.add_argument( '-mg','--matchLength', metavar='<INT>', type=int, default=0,
-                    help="Minimum length of the alignment required to be considered a valid match. [default: 0]")
-
-    p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0]")
+    p.add_argument( '-mg','--matchLength', metavar='<INT>', type=int, default=100,
+                    help="Minimum length of the alignment required to be considered a valid match. [default: 100]")
 
     p.add_argument( '-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str, default='0.9,0.95,0.99',
                     help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
 
+    p.add_argument( '-Mc','--minCov', metavar='<FLOAT>', type=float, default=0,
+                    help="Minimum signature coverage to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Mr','--minReads', metavar='<INT>', type=int, default=0,
+                    help="Minimum number of reads to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Ml','--minLen', metavar='<INT>', type=int, default=0,
+                    help="Minimum signature length to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
+                    help="Maximum estimated z-score for the depths of the mapped region. Set to 0 to disable. [default: 0]")
+
     p.add_argument( '-nc','--noCutoff', action="store_true",
-                    help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -ss 0,0,0]")
+                    help="Remove all cutoffs applied during the taxonomic profiling stage (alignment thresholds will remain applied). This option is equivalent to use [-Mc 0 -Mr 0 -Ml 0 -Mz 0 -ss 0,0,0]")
 
     p.add_argument( '-a','--accList', metavar='[FILE]', required=False, type=str,
                     help="A file of list with accessions of interest (e.g. plasmid accessions).")
 
     p.add_argument( '-aa','--accListAction', choices=['exclude', 'only', 'report'], default='report', type=str,
                     help=("Action for aligned reads mapping to the accession list. "
-                          "exclude: discard reads matching accessions of interest in the list. "
-                          "only: output only reads matching accessions of interest in the list. "
-                          "report: do not filter; report reads matching accessions of interest in the list (AOI_READ_COUNT). "
+                          "'exclude': discard reads matching accessions of interest in the list. "
+                          "'only': output only reads matching accessions of interest in the list. "
+                          "'report': do not filter; report reads matching accessions of interest in the list (AOI_READ_COUNT). "
                           "[default: report]"))
 
     p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
@@ -278,6 +278,17 @@ def parse_args(ver, args):
     if args_parsed.m2options == 'auto':
         args_parsed.m2options = '-s60'
 
+    if args_parsed.matchIdentity:
+        if args_parsed.matchIdentity < 0 or args_parsed.matchIdentity > 1:
+            p.error( '--matchIdentity must be between 0 and 1.' )
+    
+    if args_parsed.matchIdentity is None:
+         if args_parsed.nanopore:
+            args_parsed.matchIdentity = 0.85
+            args_parsed.matchFraction = 0
+         else:
+            args_parsed.matchIdentity = 0.95
+
     if not args_parsed.errorRate:
         if args_parsed.nanopore:
             args_parsed.errorRate = 0.03
@@ -387,8 +398,9 @@ def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity, matchL
 
         if not valid_match_flag:
             invalid_match_count += 1
+            continue
 
-        if pri_aln_flag and valid_match_flag:
+        if pri_aln_flag:
             if k in res:
                 res[k]['REGIONS'] = merge_ranges(res[k]['REGIONS']+[r])
                 res[k]["MB"] += r[1] - r[0] + 1
@@ -431,8 +443,8 @@ def parse(line, matchFraction, matchIdentity, matchLength):
             flag (str): SAM flag,
             cigar (str): CIGAR string,
             primary_alignment_flag (bool): Whether this is a primary alignment,
-            valid_match_flag: whether this alignment meets match criteria
-
+            valid_match_flag (bool): Whether this alignment meets match criteria,
+            sr_chunk_flag (bool): Whether this is a chunked read
         )
     
     Example:
@@ -767,8 +779,8 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
         matchFraction (float): Minimum fraction required for a valid match
         matchIdentity (float): Minimum identity required for a valid match
         max_per_taxon (int): Maximum sequences to extract per taxon
-        acc_list (list, optional): List of accessions to filter
-        acc_list_action (str, optional): Action to take with the accession list (e.g., "include" or "exclude")
+        acc_list (list, optional): List of accessions of interest
+        acc_list_action (str, optional): Action to take with the accession list (e.g., "exclude")
         format (str): Output format ('fasta' or 'fastq')
         
     Returns:
@@ -863,10 +875,15 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
                         elif int(flag) & 128:
                             mate = '.2'
 
+                    mapping_len = region[1] - region[0] + 1
+                    ref_len = int(rend) - int(rstart) + 1
+                    mapping_idt = 1 - (nm + nid) / mapping_len
+                    mapping_frac = max(mapping_len/read_len, mapping_len/ref_len)
+
                     if format == 'fasta':
-                        fasta_entry = f">{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag}\n{seq_to_use}\n"
+                        fasta_entry = f">{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag} MG={mapping_len} MI={mapping_idt:.2f} MF={mapping_frac:.2f}\n{seq_to_use}\n"
                     else:
-                        fasta_entry = f"@{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag}\n{seq_to_use}\n+\n{rq}\n"
+                        fasta_entry = f"@{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag} MG={mapping_len} MI={mapping_idt:.2f} MF={mapping_frac:.2f}\n{seq_to_use}\n+\n{rq}\n"
                     taxon_seqs[taxid].append(fasta_entry)
         except Exception as e:
             # Skip problematic lines
@@ -903,8 +920,8 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
     Parameters:
         r (dict): Dictionary with reference sequences as keys and mapping statistics
                  as values (output from process_sam_file)
-        acc_list (list): List of accessions to consider (optional)
-        acc_list_action (str): Action to take for accessions in acc_list (optional)
+        acc_list (list, optional): List of accessions of interest
+        acc_list_action (str, optional): Action to take with the accession list (e.g., "exclude")
     Returns:
         pandas.DataFrame: DataFrame with strain-level statistics
     """
@@ -919,7 +936,7 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
     r_df['RR'] = 0
 
     if acc_list:
-        idx = r_df['ACC'].isin(acc_list)
+        idx = r_df['ACC'].isin(acc_list) | r_df['RNAME'].isin(acc_list)
         r_df.loc[idx, 'RR'] = r_df.loc[idx, 'MR'] # report the read count for the accession#s of interest
 
         if acc_list_action == 'exclude':
@@ -941,7 +958,7 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
         'MB':'sum', # of mapped bases
         'MR':'sum', # of mapped reads
         'NM':'sum', # of mismatches
-        'ID':'sum', # of mismatches
+        'ID':'sum', # of indels
         'SC':'sum', # covered signature length
         'SLEN':'sum', # length of this signature fragments (mapped)
         'RL':'sum', # length of the reads
@@ -1997,7 +2014,7 @@ def main(args):
         (res, mapped_r_cnt, tol_alignment_count, tol_invalid_match_count) = process_sam_file( os.path.abspath(samfile), argvs.threads, argvs.matchFraction, argvs.matchIdentity, argvs.matchLength, split_read_flag)
         gc.collect()
 
-        print_message( f" - {tol_alignment_count} mapped reads processed", argvs.silent, begin_t, logfile )
+        print_message( f" - {tol_alignment_count} alignments processed", argvs.silent, begin_t, logfile )
         print_message( f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile )
 
         if mapped_r_cnt:
