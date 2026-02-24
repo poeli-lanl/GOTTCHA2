@@ -43,7 +43,9 @@ setup(
         'numpy>=1.19.0',
         'pandas>=1.2.0',
         'requests>=2.25.0',
-        'setuptools>=45.0',
+        'biom-format>=2.1.7',
+        'pysam>=0.22.0',
+        'tqdm',
     ],
     entry_points={
         'console_scripts': [
@@ -62,6 +64,7 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Topic :: Scientific/Engineering :: Bioinformatics",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],

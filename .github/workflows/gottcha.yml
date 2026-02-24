@@ -26,10 +26,16 @@ jobs:
         with:
           path: GOTTCHA2
 
+      - name: Install external dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minimap2
+          sudo apt-get install -y samtools
+
       - name: Installation
         run: |
           cd GOTTCHA2
-          pip install .
+          python -m pip install .
           gottcha2 profile --help
 
       - name: Run testing dataset - Basic profile tests

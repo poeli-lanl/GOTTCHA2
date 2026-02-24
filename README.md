@@ -17,12 +17,17 @@ GOTTCHAv2 is currently under development in BETA stage. Pre-built databases for 
 -------------------------------------------------------------------
 ## DEPENDENCIES
 
-GOTTCHA2 profiler is written in Python3 and leverage minimap2 to map reads to signature sequences. In order to run GOTTCHA2 correctly, your system requires to have following dependencies installed correctly. The YAML file for Conda environment can be found in `environment.yml`.
+GOTTCHA2 profiler is written in Python 3 and uses minimap2 to map reads to signature sequences. To run GOTTCHA2, install the following dependencies. A ready-to-use Conda environment file is provided at `environment.yml`.
 
 - Python 3.8+
 - minimap2 2.17+
-- pandas
 - samtools
+- numpy
+- pandas
+- requests
+- biom-format
+- pysam
+- tqdm
 
 -------------------------------------------------------------------
 ## QUICK START
@@ -33,19 +38,17 @@ GOTTCHA2 profiler is written in Python3 and leverage minimap2 to map reads to si
 
         OR
 
-        Download or git clone GOTTCHA2 from this repository and run `python -m pip install .`
+        Download or git clone GOTTCHA2 from this repository and run:
+
+        `python -m pip install .`
 
         (For development installs: `python -m pip install -e .`)
 
-3. Download the latest version of the GOTTCHA2 database. (This step may take some time)
+2. Download the latest version of the GOTTCHA2 database. (This step may take some time)
 
         https://ref-db.edgebioinformatics.org/gottcha2/RefSeq-r220/
 
-4. Run GOTTCHA2:
-        
-        $ gottcha2.py -d RefSeq-r220_BAVxH-cg/gottcha_db.species.fna -t 8 -i <FASTQ>
-        
-        OR
+3. Run GOTTCHA2:
         
         $ gottcha2 profile -d RefSeq-r220_BAVxH-cg/gottcha_db.species.fna -t 8 -i <FASTQ>
 
