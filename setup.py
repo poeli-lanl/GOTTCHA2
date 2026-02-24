@@ -7,7 +7,7 @@ from setuptools import setup, find_packages
 # Ensure local package imports work when setup.py is executed in an isolated build env.
 sys.path.insert(0, os.path.dirname(__file__))
 
-from gottcha._version import __version__ as version
+from gottcha import __version__ as version
 
 # Read README file
 readme_path = os.path.join(os.path.dirname(__file__), 'README.md')

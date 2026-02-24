@@ -936,11 +936,11 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
     r_df['RR'] = 0
 
     if acc_list:
-        idx = r_df['ACC'].isin(acc_list) | r_df['RNAME'].isin(acc_list)
+        idx = (r_df['ACC'].isin(acc_list) | r_df['RNAME'].isin(acc_list))
         r_df.loc[idx, 'RR'] = r_df.loc[idx, 'MR'] # report the read count for the accession#s of interest
 
         if acc_list_action == 'exclude':
-            r_df.loc[idx, ['MB', 'MR', 'NM', 'ID', 'SC', 'RL']] = 0 # set mapped bases, read count, mismatch and covered sig len to 0 for the accession#s of interest
+            r_df = r_df.loc[~idx] # set mapped bases, read count, mismatch and covered sig len to 0 for the accession#s of interest
         elif acc_list_action == 'only':
             r_df = r_df[idx].reset_index(drop=True)
 

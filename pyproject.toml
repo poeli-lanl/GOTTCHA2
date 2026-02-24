@@ -55,4 +55,4 @@ include = ["gottcha*"]
 exclude = ["test*", "tests*", "docs*"]
 
 [tool.setuptools.dynamic]
-version = {attr = "gottcha._version.__version__"}
+version = {attr = "gottcha.__version__"}
