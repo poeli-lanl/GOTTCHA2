@@ -932,12 +932,14 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
     r_df['RNAME'] = r_df['RNAME'].str.rstrip('|')
     r_df[['ACC','RSTART','REND','TAXID']] = r_df['RNAME'].str.split('|', expand=True)
 
-    # add reportable read count
+    # add AOI read count
     r_df['RR'] = 0
+    aoi_read_count = 0
 
     if acc_list:
         idx = (r_df['ACC'].isin(acc_list) | r_df['RNAME'].isin(acc_list))
         r_df.loc[idx, 'RR'] = r_df.loc[idx, 'MR'] # report the read count for the accession#s of interest
+        aoi_read_count = r_df.loc[idx, 'MR'].sum()
 
         if acc_list_action == 'exclude':
             r_df = r_df.loc[~idx] # set mapped bases, read count, mismatch and covered sig len to 0 for the accession#s of interest
@@ -1002,9 +1004,9 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
     # estimate z-score
     str_df['ZSCORE'] = str_df.apply(lambda x: pile_lvl_zscore(x.TOTAL_BP_MAPPED, x.TOTAL_SIG_LEN, x.COVERED_SIG_LEN), axis=1)
 
-    return str_df
+    return str_df, aoi_read_count
 
-def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, sni_score_strain, sni_score_cutoff, error_rate, acc_list=None, acc_list_action=None):
+def aggregate_taxonomy(str_df, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, sni_score_strain, sni_score_cutoff, error_rate):
     """
     Aggregate strain-level results to higher taxonomic ranks.
     
@@ -1039,11 +1041,6 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
     """
 
     major_ranks = {"superkingdom":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7,"strain":8}
-
-    # agg signature fragments to strains
-    str_df = group_refs_to_strains(r, acc_list, acc_list_action)
-    # total reads mapped to accession#s of interest
-    total_reportable_read_count = str_df['AOI_READ_COUNT'].sum()
 
     # produce columns for the final report at each ranks
     rep_df = pd.DataFrame()
@@ -1184,7 +1181,7 @@ def aggregate_taxonomy(r, abu_col, tg_rank, mc, mr, ml, mz, sni_score_species, s
 
     logging.debug(f'rep_df: {rep_df}')
 
-    return rep_df, total_reportable_read_count
+    return rep_df
 
 
 def infer_sni_score(df, error_rate):
@@ -2026,8 +2023,11 @@ def main(args):
 
             (sni_score_cutoff, sni_score_species, sni_score_strain) = [float(x) for x in argvs.sniScore.split(',')]
 
+            # agg signature fragments to strains, and the read count of the accession#s of interest
+            str_df, aoi_read_count = group_refs_to_strains(res, acc_list, argvs.accListAction)
+
             # aggregate the results
-            _args = (res, 
+            _args = (str_df, 
                      argvs.relAbu, 
                      argvs.dbLevel, 
                      argvs.minCov, 
@@ -2037,13 +2037,12 @@ def main(args):
                      sni_score_species, 
                      sni_score_strain, 
                      sni_score_cutoff, 
-                     argvs.errorRate,
-                     acc_list,
-                     argvs.accListAction)
-            res_df, total_reportable_read_count = aggregate_taxonomy(*_args)
+                     argvs.errorRate
+                     )
+            res_df = aggregate_taxonomy(*_args)
             
             if acc_list:
-                print_message( f" - {total_reportable_read_count} reads mapped to accession#s of interest", argvs.silent, begin_t, logfile )
+                print_message( f" - {aoi_read_count} reads mapped to accession#s of interest", argvs.silent, begin_t, logfile )
             print_message( f" - {mapped_r_cnt} qualified mapped reads", argvs.silent, begin_t, logfile )
             print_message( "Done taxonomy aggregation.", argvs.silent, begin_t, logfile )
 

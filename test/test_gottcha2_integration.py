@@ -103,8 +103,9 @@ class TestGottcha2Integration(unittest.TestCase):
             'XYZ|1|100|67890': {'MB': 50, 'MR': 5, 'NM': 1, 'ID': 0, 'SC': 25, 'RL': 100}
         }
         
-        str_df = gottcha2.group_refs_to_strains(test_data, None, 'report')
+        str_df, aoi_read_count = gottcha2.group_refs_to_strains(test_data, None, 'report')
         self.assertEqual(len(str_df), 2)
+        self.assertEqual(aoi_read_count, 0)
         self.assertTrue({'TAXID', 'TOTAL_BP_MAPPED', 'TOTAL_BP_INDEL', 'AOI_READ_COUNT'}.issubset(str_df.columns))
 
     def test_taxid_file_input(self):
