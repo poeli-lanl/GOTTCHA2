@@ -2,7 +2,7 @@
 
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", "Anna Chernikov", "Jason Gans", "Tracey Freites", "Patrick Chain"]
-__version__   = "2.2.1"
+__version__   = "2.2.2"
 
 import argparse as ap
 import sys, os, time, subprocess
@@ -118,32 +118,32 @@ def parse_args(ver, args):
     p.add_argument( '--m2options', metavar='<STR>', type=str, required=False, default='auto',
                     help="The minimap2 mapping options for short reads. Do not use this option unless you know what you are doing. [default: 'auto']")
 
-    p.add_argument( '-mc','--minCov', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum signature coverage to be considered valid in abundance calculation. [default: 0]")
+    p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float, default=0.95,
+                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0.95]")
 
-    p.add_argument( '-mr','--minReads', metavar='<INT>', type=int, default=0,
-                    help="Minimum number of reads to be considered valid in abundance calculation. [default: 0]")
+    p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0.99,
+                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0.99]")
 
-    p.add_argument( '-ml','--minLen', metavar='<INT>', type=int, default=0,
-                    help="Minimum signature length to be considered valid in abundance calculation. [default: 0]")
-
-    p.add_argument( '-mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
-                    help="Maximum estimated z-score for the depths of the mapped region. Set to 0 to disable. [default: 0]")
-
-    p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0]")
-
-    p.add_argument( '-mg','--matchLength', metavar='<INT>', type=int, default=0,
-                    help="Minimum length of the alignment required to be considered a valid match. [default: 0]")
-
-    p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0]")
+    p.add_argument( '-mg','--matchLength', metavar='<INT>', type=int, default=100,
+                    help="Minimum length of the alignment required to be considered a valid match. [default: 100]")
 
     p.add_argument( '-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str, default='0.9,0.95,0.99',
                     help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
 
+    p.add_argument( '-Mc','--minCov', metavar='<FLOAT>', type=float, default=0,
+                    help="Minimum signature coverage to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Mr','--minReads', metavar='<INT>', type=int, default=0,
+                    help="Minimum number of reads to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Ml','--minLen', metavar='<INT>', type=int, default=0,
+                    help="Minimum signature length to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
+                    help="Maximum estimated z-score for the depths of the mapped region. Set to 0 to disable. [default: 0]")
+
     p.add_argument( '-nc','--noCutoff', action="store_true",
-                    help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -ss 0,0,0]")
+                    help="Remove all cutoffs applied during the taxonomic profiling stage (alignment thresholds will remain applied). This option is equivalent to use [-Mc 0 -Mr 0 -Ml 0 -Mz 0 -ss 0,0,0]")
 
     p.add_argument( '-a','--accList', metavar='[FILE]', required=False, type=str,
                     help="A file of list with accessions of interest (e.g. plasmid accessions).")
@@ -387,8 +387,9 @@ def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity, matchL
 
         if not valid_match_flag:
             invalid_match_count += 1
+            continue
 
-        if pri_aln_flag and valid_match_flag:
+        if pri_aln_flag:
             if k in res:
                 res[k]['REGIONS'] = merge_ranges(res[k]['REGIONS']+[r])
                 res[k]["MB"] += r[1] - r[0] + 1

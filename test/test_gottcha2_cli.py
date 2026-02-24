@@ -44,93 +44,92 @@ class TestGottcha2CLI(unittest.TestCase):
             f.write("read1\t0\tABC|1|100|12345\t11\t60\t5S10M3S\t*\t0\t0\tGGGGGCCCCCCCCCGGG\tHHHHHHHHHHHHHHHHH\n")
             
         # Create mock accession exclusion list
-        self.exclusion_list = os.path.join(self.test_dir, "exclude.txt")
-        with open(self.exclusion_list, 'w') as f:
+        self.acc_list = os.path.join(self.test_dir, "exclude.txt")
+        with open(self.acc_list, 'w') as f:
             f.write("ABC\nXYZ\n")
     
     def tearDown(self):
         """Clean up after tests."""
         shutil.rmtree(self.test_dir)
     
-    def test_parse_params(self):
+    def test_parse_args(self):
         """Test parameter parsing."""
         # Test version flag
         with patch('sys.exit') as mock_exit:
-            gottcha2.parse_params("1.0.0", ['-v'])
+            gottcha2.parse_args("1.0.0", ['-v'])
             mock_exit.assert_called()
         
         # Test database requirement
         with self.assertRaises(SystemExit):
-            gottcha2.parse_params("1.0.0", ['-i', 'test.fastq'])
+            gottcha2.parse_args("1.0.0", ['-i', 'test.fastq'])
         
         # Test input and SAM incompatibility
         with self.assertRaises(SystemExit):
-            gottcha2.parse_params("1.0.0", ['-i', 'test.fastq', '-s', 'test.sam', '-d', self.db_path])
+            gottcha2.parse_args("1.0.0", ['-i', 'test.fastq', '-s', 'test.sam', '-d', self.db_path])
         
         # Test valid params with input file
-        args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species'])
+        args = gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species'])
         self.assertEqual(args.database, self.db_path)
         self.assertEqual(args.dbLevel, 'species')
         
         # Test noCutoff option
-        args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-nc'])
+        args = gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-nc'])
         self.assertEqual(args.minCov, 0)
         self.assertEqual(args.minReads, 0)
         self.assertEqual(args.minLen, 0)
-        self.assertEqual(args.matchFraction, 0)
         self.assertEqual(args.maxZscore, 0)
+        self.assertEqual(args.sniScore, '0,0,0')
         
         # Test nanopore option
-        args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-np'])
+        args = gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-np'])
         self.assertEqual(args.minReads, 0)
-        self.assertEqual(args.matchFraction, 0)
 
         # Test nanopore option with multiple input files
         with self.assertRaises(SystemExit):
-            gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, self.test_fastq, '-d', self.db_path, '-l', 'species', '-np'])
+            gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, self.test_fastq, '-d', self.db_path, '-l', 'species', '-np'])
         
         # Test auto-detection of dbLevel from database name
         db_with_level = os.path.join(self.test_dir, "test_db.species.fna")
         with open(f"{db_with_level.replace('.fna', '')}.mmi", 'w') as f:
             f.write("dummy")
-        args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', db_with_level])
+        args = gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, '-d', db_with_level])
         self.assertEqual(args.dbLevel, 'species')
         
         # Test auto-detection of dbLevel from SAM file name
-        args = gottcha2.parse_params("1.0.0", ['-s', self.test_sam, '-d', self.db_path])
+        args = gottcha2.parse_args("1.0.0", ['-s', self.test_sam, '-d', self.db_path])
         self.assertEqual(args.dbLevel, 'species')
         
         # Test accession exclusion list
-        args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-A', self.exclusion_list])
-        self.assertEqual(args.accExclusionList, os.path.abspath(self.exclusion_list))
+        args = gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', '-a', self.acc_list])
+        self.assertEqual(args.accList, os.path.abspath(self.acc_list))
         
         # Test extract option with file
         taxid_file = os.path.join(self.test_dir, "taxids.txt")
         with open(taxid_file, 'w') as f:
             f.write("12345\n")
-        args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', 
+        args = gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', 
                                         '-e', f'@{taxid_file}:10:fasta'])
         self.assertEqual(args.extract, f'@{taxid_file}:10:fasta')
         
         # Test extractFullRef option
-        args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', 
+        args = gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', 
                                         '-ef'])
         self.assertEqual(args.extract, 'all:20:fasta')
         
         # Test extract and extractFullRef incompatibility
         with self.assertRaises(SystemExit):
-            gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', 
+            gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', 
                                     '-e', '12345', '-ef'])
         
         # Test removeMultipleHits auto mode
-        args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species'])
+        args = gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species'])
         self.assertEqual(args.removeMultipleHits, 'yes')
         
-        args = gottcha2.parse_params("1.0.0", ['-s', self.test_sam, '-d', self.db_path, '-l', 'species'])
+        args = gottcha2.parse_args("1.0.0", ['-s', self.test_sam, '-d', self.db_path, '-l', 'species'])
         self.assertEqual(args.removeMultipleHits, 'no')
         
         # Test explicit removeMultipleHits
-        args = gottcha2.parse_params("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', 
+        args = gottcha2.parse_args("1.0.0", ['-i', self.test_fastq, '-d', self.db_path, '-l', 'species', 
                                         '-rm', 'no'])
         self.assertEqual(args.removeMultipleHits, 'no')
     
@@ -177,9 +176,9 @@ class TestGottcha2CLI(unittest.TestCase):
         self.assertIn(self.db_path, cmd)
         mock_popen.assert_called_once()
     
-    def test_load_excluded_acc_list(self):
+    def test_load_acc_list(self):
         """Test loading excluded accession list."""
-        excluded_acc = gottcha2.load_excluded_acc_list(self.exclusion_list)
+        excluded_acc = gottcha2.load_acc_list(self.acc_list)
             
         self.assertEqual(len(excluded_acc), 2)
         self.assertIn("ABC", excluded_acc)
@@ -191,7 +190,7 @@ class TestGottcha2CLI(unittest.TestCase):
             pass
         
         with self.assertLogs(level='WARNING'):
-            empty_set = gottcha2.load_excluded_acc_list(empty_file)
+            empty_set = gottcha2.load_acc_list(empty_file)
                 
         self.assertEqual(len(empty_set), 0)
     
