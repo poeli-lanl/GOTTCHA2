@@ -3,10 +3,12 @@ try:
     # Package usage (installed)
     from . import pull_database
     from . import gottcha2
+    from . import gottcha_sam_to_bam
 except ImportError:  # pragma: no cover
     # Script usage (running from source directory)
     import pull_database
     import gottcha2
+    import gottcha_sam_to_bam
 import sys
 
 def usage():
@@ -24,12 +26,18 @@ Commands:
 
     extract    Extract reads of a specific taxon from profiled results
 
+    sam2bam    Convert SAM to sorted/indexed BAM
+
+    pull       Download/update GOTTCHA2 databases
+
     version    Display version information
     
 Examples:
     gottcha2 profile -i reads.fastq -d database/db_prefix
 
     gottcha2 extract -s prefix.sam -d database/db_prefix -e 666
+
+    gottcha2 sam2bam -i alignments.sam -o alignments.bam
 
 For detailed help on a specific command:
     gottcha2 <command> --help
@@ -44,6 +52,8 @@ def gottcha2_command():
         gottcha2.main(args[1:])
     elif args[0] == "pull":
         pull_database.main(args[1:])
+    elif args[0] == "sam2bam":
+        gottcha_sam_to_bam.main(args[1:])
     elif args[0] == "version":
         print(f"{gottcha2.__version__}")
     elif args[0] == "extract":
