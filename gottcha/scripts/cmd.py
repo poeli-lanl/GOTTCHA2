@@ -4,11 +4,13 @@ try:
     from . import pull_database
     from . import gottcha2
     from . import gottcha_sam_to_bam
+    from . import gottcha2_bam
 except ImportError:  # pragma: no cover
     # Script usage (running from source directory)
     import pull_database
     import gottcha2
     import gottcha_sam_to_bam
+    import gottcha2_bam
 import sys
 
 def usage():
@@ -50,6 +52,8 @@ def gottcha2_command():
         usage()
     elif args[0] == "profile":
         gottcha2.main(args[1:])
+    elif args[0] == "profile_bam":
+        gottcha2_bam.main(args[1:])
     elif args[0] == "pull":
         pull_database.main(args[1:])
     elif args[0] == "sam2bam":

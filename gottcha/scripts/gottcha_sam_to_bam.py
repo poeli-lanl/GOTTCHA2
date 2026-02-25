@@ -82,6 +82,7 @@ def main(argv):
     
     try:
         convert_sam_to_bam(args.input, args.output, args.threads, args.quiet)
+        logging.info("SAM to BAM conversion successful.")
     except Exception as e:
         logging.info(f"Error converting file: {e}", file=sys.stderr)
         sys.exit(1)
