@@ -146,14 +146,14 @@ def parse_args(ver, args):
                     help="Remove all cutoffs applied during the taxonomic profiling stage (alignment thresholds will remain applied). This option is equivalent to use [-Mc 0 -Mr 0 -Ml 0 -Mz 0 -ss 0,0,0]")
 
     p.add_argument( '-a','--accList', metavar='[FILE]', required=False, type=str,
-                    help="A file of list with accessions of interest (e.g. plasmid accessions).")
+                    help="A file of list with accession-of-interest (e.g. plasmid accessions).")
 
-    p.add_argument( '-aa','--accListAction', choices=['exclude', 'only', 'report'], default='report', type=str,
+    p.add_argument( '-aa','--accListAction', choices=['filter_out', 'filter_in', 'report_only'], default='report_only', type=str,
                     help=("Action for aligned reads mapping to the accession list. "
-                          "'exclude': discard reads matching accessions of interest in the list. "
-                          "'only': output only reads matching accessions of interest in the list. "
-                          "'report': do not filter; report reads matching accessions of interest in the list (AOI_READ_COUNT). "
-                          "[default: report]"))
+                          "'filter_out': discard reads matching accession-of-interest in the list. "
+                          "'filter_in': output only reads matching accession-of-interest in the list. "
+                          "'report_only': do not filter; report reads matching accession-of-interest in the list (AOI_READ_COUNT). "
+                          "[default: report_only]"))
 
     p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
                     help="The multiple hit removal step is automatically enabled for sequence input files and disabled for SAM files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
@@ -779,8 +779,8 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
         matchFraction (float): Minimum fraction required for a valid match
         matchIdentity (float): Minimum identity required for a valid match
         max_per_taxon (int): Maximum sequences to extract per taxon
-        acc_list (list, optional): List of accessions of interest
-        acc_list_action (str, optional): Action to take with the accession list (e.g., "exclude")
+        acc_list (list, optional): List of accession-of-interest
+        acc_list_action (str, optional): Action to take with the accession list (e.g., "filter_out")
         format (str): Output format ('fasta' or 'fastq')
         
     Returns:
@@ -818,10 +818,10 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
             if acc_list:
                 if acc in acc_list:
                     aoi_flag = True
-                    if acc_list_action == 'exclude':
+                    if acc_list_action == 'filter_out':
                         continue
                 else:
-                    if acc_list_action == 'only':
+                    if acc_list_action == 'filter_in':
                         continue
 
             # Check if we already know what qualified taxa this reference belongs to
@@ -920,8 +920,8 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
     Parameters:
         r (dict): Dictionary with reference sequences as keys and mapping statistics
                  as values (output from process_sam_file)
-        acc_list (list, optional): List of accessions of interest
-        acc_list_action (str, optional): Action to take with the accession list (e.g., "exclude")
+        acc_list (list, optional): List of accession-of-interest
+        acc_list_action (str, optional): Action to take with the accession list (e.g., "report_only")
     Returns:
         pandas.DataFrame: DataFrame with strain-level statistics
     """
@@ -941,9 +941,9 @@ def group_refs_to_strains(r, acc_list, acc_list_action):
         r_df.loc[idx, 'RR'] = r_df.loc[idx, 'MR'] # report the read count for the accession#s of interest
         aoi_read_count = r_df.loc[idx, 'MR'].sum()
 
-        if acc_list_action == 'exclude':
+        if acc_list_action == 'filter_out':
             r_df = r_df.loc[~idx] # set mapped bases, read count, mismatch and covered sig len to 0 for the accession#s of interest
-        elif acc_list_action == 'only':
+        elif acc_list_action == 'filter_in':
             r_df = r_df[idx].reset_index(drop=True)
 
         # if after applying the accession list filter, there is no valid mapping left, exit the program
@@ -1034,7 +1034,7 @@ def aggregate_taxonomy(str_df, abu_col, tg_rank, mc, mr, ml, mz, sni_score_speci
         sni_score_strain (float): SNI-score cutoff for strain level
         error_rate (float): Error rate for SNI-score inference
         acc_list (list, optional): List of accessions to filter
-        acc_list_action (str, optional): Action to take with the accession list (e.g., "include" or "exclude")
+        acc_list_action (str, optional): Action to take with the accession list (e.g., "report_only")
         
     Returns:
         pandas.DataFrame: DataFrame with rolled-up taxonomy at all ranks
@@ -1596,25 +1596,25 @@ def remove_multiple_hits(samfile, samfile_temp):
 
 def load_acc_list(filepath):
     """
-    Load a list of accession numbers to exclude from processing.
+    Load a list of accession numbers.
     
     Reads a file containing accession numbers (one per line) and returns them
     as a set for efficient lookup during processing. Empty lines are ignored.
     
     Parameters:
-        filepath (str): Path to the file containing accession numbers to exclude
+        filepath (str): Path to the file containing accession numbers
         
     Returns:
-        set: Set of accession numbers to exclude. Returns empty set if input file is empty.
+        set: Set of accession numbers. Returns empty set if input file is empty.
         
     Example:
-        exclude_list = load_acc_list('exclude.txt')
+        acc_list = load_acc_list('plasmid.txt')
     """
     with open(filepath) as f:
         acc_list = f.read().splitlines()
 
     if len(acc_list) == 0:
-        logging.warning(f"Exclude accession list is empty.")
+        logging.warning(f"Accession list is empty.")
         return set()
     else:
         return set(acc_list)
@@ -1901,9 +1901,9 @@ def main(args):
     if argvs.errorRate >= 0.0:
         print_message( f"    Read error rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile )
     if argvs.accList:
-        print_message( f"    Reportable acc list: {argvs.accList}", argvs.silent, begin_t, logfile )
+        print_message( f"    Acc-of-int list    : {argvs.accList}", argvs.silent, begin_t, logfile )
     if argvs.accList:
-        print_message( f"    Reportable acc action: {argvs.accListAction}", argvs.silent, begin_t, logfile )
+        print_message( f"    Acc-of-int action  : {argvs.accListAction}", argvs.silent, begin_t, logfile )
     if argvs.extract:
         print_message( f"    Extract seqs       : {argvs.extract}",     argvs.silent, begin_t, logfile )
     if argvs.minCov > 0:
@@ -1912,10 +1912,10 @@ def main(args):
         print_message( f"    Minimal SIG length : {argvs.minLen}",      argvs.silent, begin_t, logfile )
     if argvs.minReads > 0:
         print_message( f"    Minimal reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile )
-    if argvs.matchFraction > 0:
-        print_message( f"    Minimal mFraction  : {argvs.matchFraction}", argvs.silent, begin_t, logfile )
     if argvs.matchIdentity > 0:
         print_message( f"    Minimal mIdentity  : {argvs.matchIdentity}", argvs.silent, begin_t, logfile )
+    if argvs.matchFraction > 0:
+        print_message( f"    Minimal mFraction  : {argvs.matchFraction}", argvs.silent, begin_t, logfile )
     if argvs.matchLength > 0:
         print_message( f"    Minimal mLength    : {argvs.matchLength}", argvs.silent, begin_t, logfile )
     if argvs.maxZscore > 0:
@@ -2013,6 +2013,7 @@ def main(args):
 
         print_message( f" - {tol_alignment_count} alignments processed", argvs.silent, begin_t, logfile )
         print_message( f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile )
+        print_message( f" - {mapped_r_cnt} qualified mapped reads", argvs.silent, begin_t, logfile )
 
         if mapped_r_cnt:
             # Set SNI-SCORE default to 0.8, species 0.95, strain 0.99
@@ -2042,8 +2043,14 @@ def main(args):
             res_df = aggregate_taxonomy(*_args)
             
             if acc_list:
-                print_message( f" - {aoi_read_count} reads mapped to accession#s of interest", argvs.silent, begin_t, logfile )
-            print_message( f" - {mapped_r_cnt} qualified mapped reads", argvs.silent, begin_t, logfile )
+                print_message( f" - {aoi_read_count} reads mapped to accession-of-interest", argvs.silent, begin_t, logfile )
+                read_count_after_aoi = mapped_r_cnt
+                if argvs.accListAction == 'filter_out':
+                    read_count_after_aoi = mapped_r_cnt - aoi_read_count
+                elif argvs.accListAction == 'filter_in':
+                    read_count_after_aoi = aoi_read_count
+                print_message( f" - {read_count_after_aoi} reads after applying accession-of-interest action ({argvs.accListAction})", argvs.silent, begin_t, logfile )
+
             print_message( "Done taxonomy aggregation.", argvs.silent, begin_t, logfile )
 
             if not len(res_df):
