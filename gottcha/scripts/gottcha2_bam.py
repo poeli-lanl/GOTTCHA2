@@ -126,42 +126,42 @@ def parse_args(ver, args):
     p.add_argument( '--m2options', metavar='<STR>', type=str, required=False, default='auto',
                     help="The minimap2 mapping options for short reads. Do not use this option unless you know what you are doing. [default: 'auto']")
 
-    p.add_argument( '-mc','--minCov', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum signature coverage to be considered valid in abundance calculation. [default: 0]")
+    p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float,
+                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0.95 for short reads, 0.9 for nanopore reads]")
 
-    p.add_argument( '-mr','--minReads', metavar='<INT>', type=int, default=0,
-                    help="Minimum number of reads to be considered valid in abundance calculation. [default: 0]")
+    p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0.99,
+                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0.99]")
 
-    p.add_argument( '-ml','--minLen', metavar='<INT>', type=int, default=0,
-                    help="Minimum signature length to be considered valid in abundance calculation. [default: 0]")
-
-    p.add_argument( '-mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
-                    help="Maximum estimated z-score for the depths of the mapped region. Set to 0 to disable. [default: 0]")
-
-    p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0]")
-
-    p.add_argument( '-mg','--matchLength', metavar='<INT>', type=int, default=0,
-                    help="Minimum length of the alignment required to be considered a valid match. [default: 0]")
-
-    p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0]")
+    p.add_argument( '-mg','--matchLength', metavar='<INT>', type=int, default=100,
+                    help="Minimum length of the alignment required to be considered a valid match. [default: 100]")
 
     p.add_argument( '-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str, default='0.9,0.95,0.99',
                     help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
 
+    p.add_argument( '-Mc','--minCov', metavar='<FLOAT>', type=float, default=0,
+                    help="Minimum signature coverage to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Mr','--minReads', metavar='<INT>', type=int, default=0,
+                    help="Minimum number of reads to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Ml','--minLen', metavar='<INT>', type=int, default=0,
+                    help="Minimum signature length to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
+                    help="Maximum estimated z-score for the depths of the mapped region. Set to 0 to disable. [default: 0]")
+
     p.add_argument( '-nc','--noCutoff', action="store_true",
-                    help="Remove all cutoffs. This option is equivalent to use [-mc 0 -mr 0 -ml 0 -mf 0 -mz 0 -ss 0,0,0]")
+                    help="Remove all cutoffs applied during the taxonomic profiling stage (alignment thresholds will remain applied). This option is equivalent to use [-Mc 0 -Mr 0 -Ml 0 -Mz 0 -ss 0,0,0]")
 
     p.add_argument( '-a','--accList', metavar='[FILE]', required=False, type=str,
-                    help="A file of list with accessions of interest (e.g. plasmid accessions).")
+                    help="A file of list with accession-of-interest (e.g. plasmid accessions).")
 
-    p.add_argument( '-aa','--accListAction', choices=['exclude', 'only', 'report'], default='report', type=str,
+    p.add_argument( '-aa','--accListAction', choices=['filter_out', 'filter_in', 'report_only'], default='report_only', type=str,
                     help=("Action for aligned reads mapping to the accession list. "
-                          "'exclude': discard reads matching accessions of interest in the list. "
-                          "'only': output only reads matching accessions of interest in the list. "
-                          "'report': do not filter; report reads matching accessions of interest in the list (AOI_READ_COUNT). "
-                          "[default: report]"))
+                          "'filter_out': discard reads matching accession-of-interest in the list. "
+                          "'filter_in': output only reads matching accession-of-interest in the list. "
+                          "'report_only': do not filter; report reads matching accession-of-interest in the list (AOI_READ_COUNT). "
+                          "[default: report_only]"))
 
     p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
                     help="The multiple hit removal step is automatically enabled for sequence input files and disabled for SAM files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
@@ -285,6 +285,17 @@ def parse_args(ver, args):
             args_parsed.removeMultipleHits = "yes"
         else:
             args_parsed.removeMultipleHits = "no"
+
+    if args_parsed.matchIdentity:
+        if args_parsed.matchIdentity < 0 or args_parsed.matchIdentity > 1:
+            p.error( '--matchIdentity must be between 0 and 1.' )
+    
+    if args_parsed.matchIdentity is None:
+         if args_parsed.nanopore:
+            args_parsed.matchIdentity = 0.85
+            args_parsed.matchFraction = 0
+         else:
+            args_parsed.matchIdentity = 0.95
 
     if args_parsed.extractFullRef:
         args_parsed.extract = 'all:20:fasta'
@@ -1023,12 +1034,13 @@ def infer_sni_score(row, error_rate):
     
     # remove the expected 0.5 % sequencing-error penalty
     m_rate = (row["TOTAL_BP_MISMATCH"]/row["TOTAL_BP_MAPPED"])
+    m_rate = (row["CONSENSUS_DIFF"]/row["COVERED_SIG_LEN"])
     m_rate_adj = m_rate - error_rate
     m_rate_adj = np.clip(m_rate_adj, a_min=1e-12, a_max=None)  # avoid negative values
 
     # observed SCORE
     p_hat = 1 - m_rate_adj
-    p_hat = np.clip(row["CONSENSUS_REF_IDT"] + error_rate, a_min=1e-12, a_max=1-1e-12)  # avoid 0 or 1 values
+    p = 1 - m_rate
 
     # cov is the coverage of the signature space, used to widen the confidence interval when only a fraction of the signature is covered
     n_eff  = n * cov
