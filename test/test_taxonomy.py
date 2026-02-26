@@ -14,9 +14,9 @@ sys.path.insert(0, str(project_root))
 
 # Import the module - adjust if needed based on project structure
 try:
-    from gottcha.scripts import taxonomy as gt
+    from gottcha.utils import taxonomy as gt
 except ImportError:
-    import gottcha.scripts.taxonomy as gt
+    import gottcha.utils.taxonomy as gt
 
 class TestTaxonomy(unittest.TestCase):
     """Tests for taxonomy.py functions."""

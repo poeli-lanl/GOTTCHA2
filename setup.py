@@ -49,10 +49,18 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'gottcha2=gottcha.scripts.cmd:gottcha2_command',
+            'gottcha2=gottcha.utils.cmd:gottcha2_command',
         ],
     },
-    scripts=['gottcha/scripts/gottcha2.py', 'gottcha/scripts/pull_database.py', 'gottcha/scripts/taxonomy.py', 'gottcha/scripts/cmd.py', 'gottcha/scripts/split_reads.py'],
+    scripts=[
+        'gottcha/gottcha2.py',
+        'gottcha/utils/pull_database.py',
+        'gottcha/utils/taxonomy.py',
+        'gottcha/utils/split_reads.py',
+        'gottcha/utils/gottcha_sam_to_bam.py',
+        'gottcha/utils/gottcha2_bam.py',
+        'gottcha/utils/extract_taxa_reads.py',
+    ],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Environment :: Console",

@@ -49,7 +49,6 @@ import pysam
 _BAM: Optional[pysam.AlignmentFile] = None
 _CFG = {}
 
-
 def _init_worker(
     bam_path: str,
     htslib_threads: int,
@@ -270,7 +269,7 @@ def comp_cov_mismatches(bam_path: str,
                         min_alen: int,
                         min_mapq: Optional[int] = 0,
                         htslib_threads: Optional[int] = 1,
-                        chunk_size: Optional[int] = 1_000_000,
+                        chunk_size: Optional[int] = 10_000_000,
                         imap_chunksize: Optional[int] = 1,
                         include_secondary: Optional[bool] = False,
                         include_supplementary: Optional[bool] = False,
@@ -409,17 +408,18 @@ def group_refs_to_strains(ref_chunk_results, acc_list, acc_list_action, df_stats
 
     # add reportable read count
     r_df['AOI_READ_COUNT'] = 0
+    aoi_read_count = 0
 
     r_df[['ACC','RSTART','REND','TAXID']] = r_df['RNAME'].str.split('|', expand=True)
 
     if acc_list:
-        idx = r_df['ACC'].isin(acc_list) | r_df['RNAME'].isin(acc_list)
+        idx = (r_df['ACC'].isin(acc_list) | r_df['RNAME'].isin(acc_list))
         r_df.loc[idx, 'AOI_READ_COUNT'] = r_df.loc[idx, 'NUMREADS'] # report the read count for the accession#s of interest
+        aoi_read_count = r_df.loc[idx, 'NUMREADS'].sum()
 
-        if acc_list_action == 'exclude':
-            cols = r_df.columns.to_list()[1:]
-            r_df.loc[idx, cols] = 0 # set mapped bases, read count, mismatch and covered sig len to 0 for the accession#s of interest
-        elif acc_list_action == 'only':
+        if acc_list_action == 'filter_out':
+            r_df = r_df.loc[~idx] # set mapped bases, read count, mismatch and covered sig len to 0 for the accession#s of interest
+        elif acc_list_action == 'filter_in':
             r_df = r_df[idx].reset_index(drop=True)
 
         # if after applying the accession list filter, there is no valid mapping left, exit the program
@@ -478,7 +478,7 @@ def group_refs_to_strains(ref_chunk_results, acc_list, acc_list_action, df_stats
     # estimate z-score
     str_df['ZSCORE'] = str_df.apply(lambda x: pile_lvl_zscore(x.TOTAL_BP_MAPPED, x.TOTAL_SIG_LEN, x.COVERED_SIG_LEN), axis=1)
 
-    return str_df
+    return str_df, aoi_read_count
 
 
 def main(argv: Optional[List[str]] = None) -> int:

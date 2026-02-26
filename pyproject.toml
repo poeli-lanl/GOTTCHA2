@@ -44,7 +44,7 @@ Issues = "https://github.com/poeli/GOTTCHA2/issues"
 Documentation = "https://github.com/poeli/GOTTCHA2/blob/master/README.md"
 
 [project.scripts]
-gottcha2 = "gottcha.scripts.cmd:gottcha2_command"
+gottcha2 = "gottcha.utils.cmd:gottcha2_command"
 
 [tool.setuptools]
 include-package-data = true

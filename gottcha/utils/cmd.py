@@ -2,13 +2,13 @@
 try:
     # Package usage (installed)
     from . import pull_database
-    from . import gottcha2
+    from .. import gottcha2
     from . import gottcha_sam_to_bam
     from . import gottcha2_bam
 except ImportError:  # pragma: no cover
     # Script usage (running from source directory)
     import pull_database
-    import gottcha2
+    import gottcha.gottcha2 as gottcha2
     import gottcha_sam_to_bam
     import gottcha2_bam
 import sys

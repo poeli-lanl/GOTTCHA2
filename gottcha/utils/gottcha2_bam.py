@@ -2,7 +2,7 @@
 
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", "Anna Chernikov", "Jason Gans", "Tracey Freites", "Patrick Chain"]
-__version__   = "2.2.1"
+__version__   = "2.2.2"
 
 import argparse as ap
 import sys, os, time, subprocess
@@ -28,7 +28,7 @@ except ImportError:
     import taxonomy as gt
     import split_reads
     import gottcha_sam_to_bam
-    import gottcha.scripts.bam_utils as bam_utils
+    import gottcha.utils.bam_utils as bam_utils
 
 def parse_args(ver, args):
     """
@@ -1836,7 +1836,7 @@ def main(args):
                                                                      min_alen=argvs.matchLength,
                                                                      split_read_flag=split_read_flag)
 
-            str_df = bam_utils.group_refs_to_strains(ref_chunk_results, acc_list, argvs.accListAction, df_stats)
+            str_df, aoi_read_count = bam_utils.group_refs_to_strains(ref_chunk_results, acc_list, argvs.accListAction, df_stats)
 
             tol_alignment_count = str_df['READ_COUNT'].sum()
             tol_invalid_match_count = str_df['INVALID_ALNS'].sum()
@@ -1845,10 +1845,11 @@ def main(args):
             print_message( f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile )
 
             gc.collect()
-        else:
-            print_message( f"ERROR: BAM file {bamfile} or its index not found.", argvs.silent, begin_t, logfile, errorout=1)
 
-        if tol_alignment_count:
+            if not tol_alignment_count:
+                print_message( "No qualified alignments found. Stopping.", argvs.silent, begin_t, logfile )
+                sys.exit(0)
+
             # Set SNI-SCORE default to 0.8, species 0.95, strain 0.99
             if ',' not in argvs.sniScore:
                 argvs.sniScore = ','.join([argvs.sniScore]*3)
@@ -1869,14 +1870,21 @@ def main(args):
                      sni_score_strain, 
                      sni_score_cutoff, 
                      argvs.errorRate)
-            res_df, total_aoi_read_count = aggregate_taxonomy(*_args)
+            res_df, aoi_read_count = aggregate_taxonomy(*_args)
             
             if acc_list:
-                print_message( f" - {total_aoi_read_count} reads mapped to accession#s of interest", argvs.silent, begin_t, logfile )
-            print_message( "Done taxonomy aggregation.", argvs.silent, begin_t, logfile )
+                print_message(f" - {aoi_read_count} reads mapped to accession-of-interest", argvs.silent, begin_t, logfile)
+                read_count_after_aoi = tol_alignment_count
+                if argvs.accListAction == 'filter_out':
+                    read_count_after_aoi = tol_alignment_count - aoi_read_count
+                elif argvs.accListAction == 'filter_in':
+                    read_count_after_aoi = aoi_read_count
+                print_message(f" - {read_count_after_aoi} reads after applying accession-of-interest action ({argvs.accListAction})", argvs.silent, begin_t, logfile)
+
+            print_message("Done taxonomy aggregation.", argvs.silent, begin_t, logfile)
 
             if not len(res_df):
-                print_message( "No qualified taxonomy profiled.", argvs.silent, begin_t, logfile )
+                print_message("No qualified taxonomy profiled.", argvs.silent, begin_t, logfile)
             else:
                 # generate output results
                 if argvs.format == "biom":
@@ -1890,7 +1898,7 @@ def main(args):
                 target_df = res_df.loc[target_idx, ['ABUNDANCE','TAXID']]
                 tax_num = len(target_df)
 
-                print_message( f"{tax_num} qualified {argvs.dbLevel} profiled.", argvs.silent, begin_t, logfile )
+                print_message(f"{tax_num} qualified {argvs.dbLevel} profiled.", argvs.silent, begin_t, logfile)
 
                 if tax_num:
                     generate_lineage_file(target_df, outfile_lineage)
@@ -1898,11 +1906,12 @@ def main(args):
                     if argvs.mpa:
                         target_df = res_df.loc[target_idx, ['TAXID', 'REL_ABUNDANCE', 'REL_ABUNDANCE_GC','READ_COUNT', 'SIG_COV']]
                         generate_mpa_file(target_df, outfile_mpa)
-                        print_message( f"MPA format file saved to {outfile_mpa}.", argvs.silent, begin_t, logfile )
+                        print_message(f"MPA format file saved to {outfile_mpa}.", argvs.silent, begin_t, logfile)
 
-                print_message( f"Results saved to {outfile}.", argvs.silent, begin_t, logfile )
+                print_message(f"Results saved to {outfile}.", argvs.silent, begin_t, logfile)
         else:
-            print_message( "GOTTCHA2 stopped.", argvs.silent, begin_t, logfile)
+            print_message( f"ERROR: BAM file {bamfile} or its index not found.", argvs.silent, begin_t, logfile, errorout=1)
+            print_message("GOTTCHA2 stopped.", argvs.silent, begin_t, logfile)
             sys.exit(0)
 
     # extracting reads

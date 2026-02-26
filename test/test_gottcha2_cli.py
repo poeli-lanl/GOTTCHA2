@@ -14,7 +14,7 @@ project_root = current_dir.parent
 sys.path.insert(0, str(project_root))
 
 # Import the module
-import gottcha.scripts.gottcha2 as gottcha2
+import gottcha.gottcha2 as gottcha2
 
 class TestGottcha2CLI(unittest.TestCase):
     """Test command-line interface functionality of GOTTCHA2."""

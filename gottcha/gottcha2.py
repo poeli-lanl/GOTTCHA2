@@ -18,8 +18,8 @@ from types import SimpleNamespace
 
 try:
     # Try relative import first (for package usage)
-    from . import taxonomy as gt
-    from . import split_reads
+    from .utils import taxonomy
+    from .utils import split_reads
 except ImportError:
     # Fall back to direct import (for script usage)
     import taxonomy as gt
@@ -367,7 +367,7 @@ def worker(filename, chunkStart, chunkSize, matchFraction, matchIdentity, matchL
         chunkSize (int): Number of bytes to read from the start position
         matchFraction (float): Minimum fraction required for a valid match
         matchIdentity (float): Minimum identity required for a valid match
-        split_read_flag (bool): Flag indicating whether to split reads (optional)
+        split_read_flag (bool): Flag indicating whether reads are splitted (optional)
         
     Returns:
         dict: Dictionary with reference sequences as keys and mapping statistics as values
@@ -598,7 +598,7 @@ def process_sam_file(sam_fn, numthreads, matchFraction, matchIdentity, matchLeng
             tol_reportable_acc_count (int): Total number of accession#s of interest found
         )
     """
-    result = gt._autoVivification()
+    result = taxonomy._autoVivification()
     mapped_reads = 0
 
     print_message(f" - Processing with {numthreads} cpus...", argvs.silent, begin_t, logfile)
@@ -835,7 +835,7 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
                 for q_taxid in qualified_taxids:
                     # Avoid recomputing the lineage for each taxid check
                     if ref_lineage is None:
-                        ref_lineage = gt.taxid2fullLineage(ref_taxid, space2underscore=False)
+                        ref_lineage = taxonomy.taxid2fullLineage(ref_taxid, space2underscore=False)
                     
                     if f"|{q_taxid}|" in ref_lineage:
                         matching_taxids.append(q_taxid)
@@ -1050,7 +1050,7 @@ def aggregate_taxonomy(str_df, abu_col, tg_rank, mc, mr, ml, mz, sni_score_speci
 
     def get_taxid_lineage(taxid):
         """get taxid lineage with {rank}_names and {rank}_taxids"""
-        lineage = gt.taxid2lineageDICT(taxid).values()
+        lineage = taxonomy.taxid2lineageDICT(taxid).values()
         return [d['name'] for d in lineage]+[d['taxid'] for d in lineage]
 
     try:
@@ -1342,7 +1342,7 @@ def generate_biom_file(res_df, o, tg_rank, sampleid):
     target_df = pd.DataFrame()
     target_idx = (res_df['LEVEL']==tg_rank)
     target_df = res_df.loc[target_idx, ['ABUNDANCE','TAXID']]
-    target_df['LINEAGE'] = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, True, True)).str.split('|')
+    target_df['LINEAGE'] = target_df['TAXID'].apply(lambda x: taxonomy.taxid2lineage(x, True, True)).str.split('|')
 
     sample_ids = [sampleid]
     data = np.array(target_df['ABUNDANCE']).reshape(len(target_df), 1)
@@ -1367,7 +1367,7 @@ def generate_lineage_file(target_df, o):
     Returns:
         bool: True if successful
     """
-    lineage_df = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, True, True)).str.split('|', expand=True)
+    lineage_df = target_df['TAXID'].apply(lambda x: taxonomy.taxid2lineage(x, True, True)).str.split('|', expand=True)
     result = pd.concat([target_df['ABUNDANCE'], lineage_df], axis=1, sort=False)
     result.to_csv(o, index=False, header=False, sep='\t', float_format='%.4f')
 
@@ -1388,7 +1388,7 @@ def generate_mpa_file(target_df, o):
         bool: True if successful
     """
 
-    lineage_df = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, all_major_rank=True, print_strain=False, space2underscore=True, sep=";"))
+    lineage_df = target_df['TAXID'].apply(lambda x: taxonomy.taxid2lineage(x, all_major_rank=True, print_strain=False, space2underscore=True, sep=";"))
     result = pd.concat([target_df[['TAXID', 'REL_ABUNDANCE', 'REL_ABUNDANCE_GC', 'READ_COUNT', 'SIG_COV']], lineage_df], axis=1, sort=False)
     result.to_csv(o, index=False, header=True, sep='\t', float_format='%.4f')
 
@@ -1934,10 +1934,10 @@ def main(args):
         
     logging.info(f"Taxonomy file: {custom_taxa_tsv}")
     
-    gt.loadTaxonomy(dbpath=dbpath,
+    taxonomy.loadTaxonomy(dbpath=dbpath,
                     cus_taxonomy_file=custom_taxa_tsv, 
                     auto_download=False)
-    print_message(f" - {len(gt.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile)
+    print_message(f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile)
 
     #load database stats
     print_message("Loading database stats...", argvs.silent, begin_t, logfile)
