@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
-try:
-    # Package usage (installed)
-    from . import pull_database
-    from .. import gottcha2
-    from . import gottcha_sam_to_bam
-    from . import gottcha2_bam
-except ImportError:  # pragma: no cover
-    # Script usage (running from source directory)
-    import pull_database
-    import gottcha.gottcha2 as gottcha2
-    import gottcha_sam_to_bam
-    import gottcha2_bam
+
+from .utils import download
+from .utils import gottcha2
+from .utils import gottcha_sam_to_bam
+from .utils import gottcha2_bam
 import sys
 
 def usage():
@@ -29,8 +22,6 @@ Commands:
     extract    Extract reads of a specific taxon from profiled results
 
     sam2bam    Convert SAM to sorted/indexed BAM
-
-    pull       Download/update GOTTCHA2 databases
 
     version    Display version information
     
@@ -54,8 +45,8 @@ def gottcha2_command():
         gottcha2.main(args[1:])
     elif args[0] == "profile_bam":
         gottcha2_bam.main(args[1:])
-    elif args[0] == "pull":
-        pull_database.main(args[1:])
+    elif args[0] == "download":
+        download.main(args[1:])
     elif args[0] == "sam2bam":
         gottcha_sam_to_bam.main(args[1:])
     elif args[0] == "version":

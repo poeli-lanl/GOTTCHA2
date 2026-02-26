@@ -19,13 +19,10 @@ from types import SimpleNamespace
 
 try:
     # Try relative import first (for package usage)
-    from . import taxonomy as gt
-    from . import split_reads
-    from . import gottcha_sam_to_bam
-    from . import bam_utils
+    from . import *
 except ImportError:
     # Fall back to direct import (for script usage)
-    import taxonomy as gt
+    import taxonomy
     import split_reads
     import gottcha_sam_to_bam
     import gottcha.utils.bam_utils as bam_utils
@@ -766,7 +763,7 @@ def OptimizedFastaWorker(filename, chunkStart, chunkSize, taxa_dict, qualified_t
                 for q_taxid in qualified_taxids:
                     # Avoid recomputing the lineage for each taxid check
                     if ref_lineage is None:
-                        ref_lineage = gt.taxid2fullLineage(ref_taxid, space2underscore=False)
+                        ref_lineage = taxonomy.taxid2fullLineage(ref_taxid, space2underscore=False)
 
                     if f"|{q_taxid}|" in ref_lineage:
                         matching_taxids.append(q_taxid)
@@ -880,7 +877,7 @@ def aggregate_taxonomy(str_df, abu_col, tg_rank, mc, mr, ml, mz, sni_score_speci
 
     def get_taxid_lineage(taxid):
         """get taxid lineage with {rank}_names and {rank}_taxids"""
-        lineage = gt.taxid2lineageDICT(taxid).values()
+        lineage = taxonomy.taxid2lineageDICT(taxid).values()
         return [d['name'] for d in lineage]+[d['taxid'] for d in lineage]
 
     try:
@@ -1021,56 +1018,6 @@ def aggregate_taxonomy(str_df, abu_col, tg_rank, mc, mr, ml, mz, sni_score_speci
 
     return rep_df, total_aoi_read_count
 
-
-def infer_sni_score(row, error_rate):
-    """
-    Estimate the Average Nucleotide Identity (SNI-score) together with 95% confidence intervals:
-    - widens the interval when only a fraction of the signature space is actually covered ( SIG_COV )
-    - project mismatches onto those unique positions
-    - automatically becomes narrower as more signature bases are covered
-    """
-
-    # from scipy.stats import norm
-    # z = norm.ppf(0.5 + conf/2)  # ≈1.96
-    z = 1.959963984540054
-
-    # use only unique covered signature bases
-    n = row["COVERED_SIG_LEN"]
-    cov = np.clip(row["SIG_COV"], a_min=1e-12, a_max=None)
-
-    # remove the expected 0.5 % sequencing-error penalty
-    # m_rate = (row["TOTAL_BP_MISMATCH"]/row["TOTAL_BP_MAPPED"])
-    m_rate = (row["CONSENSUS_DIFF"]/row["COVERED_SIG_LEN"])
-    m_rate_adj = m_rate - error_rate
-    m_rate_adj = np.clip(m_rate_adj, a_min=1e-12, a_max=None)  # avoid negative values
-
-    # observed SCORE
-    p_hat = 1 - m_rate_adj
-    p = 1 - m_rate
-
-    # cov is the coverage of the signature space, used to widen the confidence interval when only a fraction of the signature is covered
-    n_eff  = n * cov
-
-    z2     = z ** 2
-    denom  = 1 + z2 / n_eff
-    center = (p_hat + z2 / (2 * n_eff)) / denom
-    hw     = (z * np.sqrt(
-                (p_hat * (1 - p_hat)) / n_eff + z2 / (4 * n_eff ** 2)
-             ) / denom)
-
-    # observed-identity CI
-    id_low, id_high = center - hw, center + hw
-
-    # convert to true SCORE by adding the sequencing-error penalty
-    score_naive = np.minimum(1, p)
-    score_low  = np.clip(id_low, 0, 1)
-    score_high = np.clip(id_high, 0, 1)
-
-    score_ci95 = "[" + score_low.round(6).astype(str) + "-" + score_high.round(6).astype(str) + "]"
-
-    return (score_naive.round(6), center.round(6), score_ci95)
-
-
 def infer_sni_score(df, error_rate):
     """
     Estimate the Average Nucleotide Identity (SNI-score) together with 95% confidence intervals:
@@ -1083,7 +1030,7 @@ def infer_sni_score(df, error_rate):
 
     # from scipy.stats import norm
     # z = norm.ppf(0.5 + conf/2)  # ≈1.96
-    z = 1.959963984540054
+    z = 1.9599639845
 
     # use only unique covered signature bases
     n = df["COVERED_SIG_LEN"]
@@ -1126,7 +1073,6 @@ def infer_sni_score(df, error_rate):
 
     return df
 
-
 def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
     """
     Generate taxonomy profiling result files in TSV or CSV format.
@@ -1159,9 +1105,7 @@ def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
             # abundance 28-30
             'GENOMIC_CONTENT_EST', 'ABUNDANCE', 'REL_ABUNDANCE_DEPTH',
             # ref genome 31-33
-            'SIG_LEVEL', 'GENOME_COUNT', 'GENOME_SIZE', 'NOTE'
-            ]
-
+            'SIG_LEVEL', 'GENOME_COUNT', 'GENOME_SIZE', 'NOTE']
 
     # replace SIG_LEVEL back to their original ranks
     major_ranks = {"superkingdom":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7, "strain":8}
@@ -1210,7 +1154,7 @@ def generate_biom_file(res_df, o, tg_rank, sampleid):
     target_df = pd.DataFrame()
     target_idx = (res_df['LEVEL']==tg_rank)
     target_df = res_df.loc[target_idx, ['ABUNDANCE','TAXID']]
-    target_df['LINEAGE'] = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, True, True)).str.split('|')
+    target_df['LINEAGE'] = target_df['TAXID'].apply(lambda x: taxonomy.taxid2lineage(x, True, True)).str.split('|')
 
     sample_ids = [sampleid]
     data = np.array(target_df['ABUNDANCE']).reshape(len(target_df), 1)
@@ -1235,7 +1179,7 @@ def generate_lineage_file(target_df, o):
     Returns:
         bool: True if successful
     """
-    lineage_df = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, True, True)).str.split('|', expand=True)
+    lineage_df = target_df['TAXID'].apply(lambda x: taxonomy.taxid2lineage(x, True, True)).str.split('|', expand=True)
     result = pd.concat([target_df['ABUNDANCE'], lineage_df], axis=1, sort=False)
     result.to_csv(o, index=False, header=False, sep='\t', float_format='%.4f')
 
@@ -1256,13 +1200,13 @@ def generate_mpa_file(target_df, o):
         bool: True if successful
     """
 
-    lineage_df = target_df['TAXID'].apply(lambda x: gt.taxid2lineage(x, all_major_rank=True, print_strain=False, space2underscore=True, sep=";"))
+    lineage_df = target_df['TAXID'].apply(lambda x: taxonomy.taxid2lineage(x, all_major_rank=True, print_strain=False, space2underscore=True, sep=";"))
     result = pd.concat([target_df[['TAXID', 'REL_ABUNDANCE', 'REL_ABUNDANCE_GC', 'READ_COUNT', 'SIG_COV']], lineage_df], axis=1, sort=False)
     result.to_csv(o, index=False, header=True, sep='\t', float_format='%.4f')
 
     return True
 
-def readMapping(reads, db, threads, mm_options, presetx, samfile, logfile):
+def read_mapping(reads, db, threads, mm_options, presetx, samfile, logfile):
     """
     Map reads to the reference database using minimap2.
 
@@ -1805,10 +1749,10 @@ def main(args):
 
     logging.info(f"Taxonomy file: {custom_taxa_tsv}")
 
-    gt.loadTaxonomy(dbpath=dbpath,
+    taxonomy.loadTaxonomy(dbpath=dbpath,
                     cus_taxonomy_file=custom_taxa_tsv,
                     auto_download=False)
-    print_message( f" - {len(gt.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile )
+    print_message( f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile )
 
     #load database stats
     print_message( "Loading database stats...", argvs.silent, begin_t, logfile )
@@ -1834,7 +1778,7 @@ def main(args):
             split_read_flag = True
 
         print_message( "Running read-mapping...", argvs.silent, begin_t, logfile )
-        exitcode, cmd, msg = readMapping( argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
+        exitcode, cmd, msg = read_mapping( argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
         gc.collect()
         print_message( f"Logfile saved to {logfile}.", argvs.silent, begin_t, logfile )
         print_message( f"COMMAND: {cmd}", argvs.silent, begin_t, logfile )

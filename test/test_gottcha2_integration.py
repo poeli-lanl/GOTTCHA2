@@ -14,7 +14,7 @@ project_root = current_dir.parent
 sys.path.insert(0, str(project_root))
 
 # Import the module
-import gottcha.gottcha2 as gottcha2
+import gottcha.utils.gottcha2 as gottcha2
 
 class TestGottcha2Integration(unittest.TestCase):
     """Integration tests for GOTTCHA2."""

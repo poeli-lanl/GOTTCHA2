@@ -49,12 +49,12 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'gottcha2=gottcha.utils.cmd:gottcha2_command',
+            'gottcha2=gottcha.cmd:gottcha2_command',
         ],
     },
     scripts=[
-        'gottcha/gottcha2.py',
-        'gottcha/utils/pull_database.py',
+        'gottcha/utils/gottcha2.py',
+        'gottcha/utils/download.py',
         'gottcha/utils/taxonomy.py',
         'gottcha/utils/split_reads.py',
         'gottcha/utils/gottcha_sam_to_bam.py',

@@ -18,8 +18,8 @@ from types import SimpleNamespace
 
 try:
     # Try relative import first (for package usage)
-    from .utils import taxonomy
-    from .utils import split_reads
+    from . import taxonomy
+    from . import split_reads
 except ImportError:
     # Fall back to direct import (for script usage)
     import taxonomy as gt
