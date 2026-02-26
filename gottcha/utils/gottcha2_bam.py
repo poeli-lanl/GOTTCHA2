@@ -894,8 +894,8 @@ def aggregate_taxonomy(str_df, abu_col, tg_rank, mc, mr, ml, mz, sni_score_speci
     str_df['SIG_LEVEL'] = str_df['SIG_LEVEL'].map(major_ranks)
 
     # infer the SNI-score for each strain
-    str_df['SIG_COV'] = str_df['COVERED_SIG_LEN']/str_df['TOTAL_SIG_LEN']
-    str_df[['SNI_NAIVE', 'SNI_SCORE', 'SNI_CI95_LH']] = str_df.apply(lambda row: infer_sni_score(row, error_rate), axis=1, result_type='expand')
+    str_df["SIG_COV"] = str_df["COVERED_SIG_LEN"]/str_df["TOTAL_SIG_LEN"]
+    str_df = infer_sni_score(str_df, error_rate)
 
     total_abundance = str_df[abu_col].sum()
 
@@ -1033,7 +1033,7 @@ def infer_sni_score(row, error_rate):
     cov = np.clip(row["SIG_COV"], a_min=1e-12, a_max=None)
     
     # remove the expected 0.5 % sequencing-error penalty
-    m_rate = (row["TOTAL_BP_MISMATCH"]/row["TOTAL_BP_MAPPED"])
+    # m_rate = (row["TOTAL_BP_MISMATCH"]/row["TOTAL_BP_MAPPED"])
     m_rate = (row["CONSENSUS_DIFF"]/row["COVERED_SIG_LEN"])
     m_rate_adj = m_rate - error_rate
     m_rate_adj = np.clip(m_rate_adj, a_min=1e-12, a_max=None)  # avoid negative values
@@ -1063,7 +1063,64 @@ def infer_sni_score(row, error_rate):
     score_ci95 = "[" + score_low.round(6).astype(str) + "-" + score_high.round(6).astype(str) + "]"
 
     return (score_naive.round(6), center.round(6), score_ci95)
+
+
+def infer_sni_score(df, error_rate):
+    """
+    Estimate the Average Nucleotide Identity (SNI-score) together with 95% confidence intervals:
+    - widens the interval when only a fraction of the signature space is actually covered ( SIG_COV )
+    - project mismatches onto those unique positions
+    - automatically becomes narrower as more signature bases are covered    
+    """
+
+    df = df.copy()
+
+    # from scipy.stats import norm
+    # z = norm.ppf(0.5 + conf/2)  # ≈1.96
+    z = 1.959963984540054
+
+    # use only unique covered signature bases
+    n = df["COVERED_SIG_LEN"]
+    cov = df["SIG_COV"].clip(lower=1e-12)  # avoid n_eff = 0
     
+    # remove the expected 0.5 % sequencing-error penalty
+    m_rate = (df["CONSENSUS_DIFF"]/df["COVERED_SIG_LEN"])
+    m_rate_adj = m_rate - error_rate
+    m_rate_adj = m_rate_adj.clip(lower=1e-12)  # avoid negative values
+
+    # observed SCORE
+    p_hat = 1 - m_rate_adj
+    p = 1 - m_rate
+
+    # cov is the coverage of the signature space, used to widen the confidence interval when only a fraction of the signature is covered
+    n_eff  = n * cov
+    
+    z2     = z ** 2
+    denom  = 1 + z2 / n_eff
+    center = (p_hat + z2 / (2 * n_eff)) / denom
+    hw     = (z * np.sqrt(
+                (p_hat * (1 - p_hat)) / n_eff + z2 / (4 * n_eff ** 2)
+             ) / denom)
+    
+    # observed-identity CI
+    id_low, id_high = center - hw, center + hw
+    
+    # convert to true SCORE by adding the sequencing-error penalty
+    score_naive = np.minimum(1, p)
+    score_low  = np.clip(id_low, 0, 1)
+    score_high = np.clip(id_high, 0, 1)
+
+    score_ci95 = "[" + score_low.round(6).astype(str) + "-" + score_high.round(6).astype(str) + "]"
+
+    df = df.assign(
+        SNI_NAIVE    = score_naive.round(6),
+        SNI_SCORE    = center.round(6),
+        SNI_CI95_LH  = score_ci95
+    )
+
+    return df
+
+
 def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
     """
     Generate taxonomy profiling result files in TSV or CSV format.
@@ -1841,8 +1898,8 @@ def main(args):
             tol_alignment_count = str_df['READ_COUNT'].sum()
             tol_invalid_match_count = str_df['INVALID_ALNS'].sum()
 
-            print_message( f" - {tol_alignment_count} qualified alignments processed", argvs.silent, begin_t, logfile )
             print_message( f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile )
+            print_message( f" - {tol_alignment_count} qualified alignments processed", argvs.silent, begin_t, logfile )
 
             gc.collect()
 
