@@ -22,7 +22,7 @@ try:
     from . import ont_utils
 except ImportError:
     # Fall back to direct import (for script usage)
-    import taxonomy as gt
+    import taxonomy
     import gottcha.utils.ont_utils as ont_utils
 
 def parse_args(ver, args):
