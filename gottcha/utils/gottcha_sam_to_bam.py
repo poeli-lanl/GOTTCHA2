@@ -64,8 +64,11 @@ def convert_sam_to_bam(input_sam: str, output_bam: str, threads=4, quiet=False) 
         
     logging.info(f"Conversion complete: {output_bam}")
 
-def main():
-    parser = argparse.ArgumentParser(description="Convert SAM to sorted BAM - optimized for large files")
+def main(argv):
+    parser = argparse.ArgumentParser(
+        prog="gottcha2 sam2bam",
+        description="Convert SAM to sorted BAM - optimized for large files"
+    )
     parser.add_argument('-i', '--input', required=True,
                        help="Input SAM file")
     parser.add_argument('-o', '--output', required=True,
@@ -75,13 +78,14 @@ def main():
     parser.add_argument('-q', '--quiet', action='store_true',
                        help="Suppress warning messages")
     
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     
     try:
         convert_sam_to_bam(args.input, args.output, args.threads, args.quiet)
+        logging.info("SAM to BAM conversion successful.")
     except Exception as e:
         logging.info(f"Error converting file: {e}", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

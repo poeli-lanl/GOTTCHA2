@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+__version__   = "2.3.0"
+__author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
+__credits__   = ["Po-E Li", 
+                 "Anna Chernikov", 
+                 "Jason Gans", 
+                 "Tracey Freites", 
+                 "Patrick Chain"]
+try:
+    from .utils import profile
+    from .utils import gottcha2_sam
+    from .utils import download
+    from .utils import gottcha_sam_to_bam
+except ImportError:
+    # If the above relative imports fail, try absolute imports (for direct execution)
+    from utils import profile
+    from utils import gottcha2_sam
+    from utils import download
+    from utils import gottcha_sam_to_bam
+
+import sys
+
+def usage():
+    """Display usage information for GOTTCHA2 command-line tool."""
+    print(f"""
+GOTTCHA2 - Genomic Origin Through Taxonomic CHAllenge v{__version__}
+
+Usage:
+    gottcha2 <command> [options]
+
+Commands:
+    profile    Use GOTTCHA2 to profile metagenomic reads against a signature database
+
+    extract    Extract reads of a specific taxon from profiled results
+
+    sam2bam    Convert GOTTCHA2 SAM to sorted/indexed BAM
+
+    version    Display version information
+    
+Examples:
+    gottcha2 profile -i reads.fastq -d database/db_prefix
+
+    gottcha2 extract -d prefix.bam -d database/db_prefix -e 666
+
+    gottcha2 sam2bam -i prefix.sam -o prefix.bam
+
+For detailed help on a specific command:
+    gottcha2 <command> --help
+""")
+    sys.exit(1)
+
+def cli():
+    args = sys.argv[1:]
+    if len(args) < 1:
+        usage()
+    elif args[0] == "profile_sam":
+        gottcha2_sam.main(args[1:])
+    elif args[0] == "profile":
+        profile.main(args[1:])
+    elif args[0] == "download":
+        download.main(args[1:])
+    elif args[0] == "sam2bam":
+        gottcha_sam_to_bam.main(args[1:])
+    elif args[0] == "version":
+        print(f"{__version__}")
+    elif args[0] == "extract":
+        profile.main(args[1:])
+
+    else:
+        print(f"Error: '{args[0]}' is not a valid command")
+        usage()

@@ -1,58 +1,45 @@
 #!/usr/bin/env python3
 
-import os
-import sys
-from setuptools import setup, find_packages
+from pathlib import Path
+import re
+from setuptools import find_packages, setup
 
-# Ensure local package imports work when setup.py is executed in an isolated build env.
-sys.path.insert(0, os.path.dirname(__file__))
+ROOT = Path(__file__).parent.resolve()
 
-from gottcha._version import __version__ as version
+def read_text(path):
+    return (ROOT / path).read_text(encoding="utf-8")
 
-# Read README file
-readme_path = os.path.join(os.path.dirname(__file__), 'README.md')
-if os.path.exists(readme_path):
-    with open(readme_path, 'r', encoding='utf-8') as fh:
-        long_description = fh.read()
-else:
-    long_description = "GOTTCHA2: Genomic Origin Through Taxonomic CHAllenge version 2"
+def read_version():
+    content = read_text("gottcha/gottcha2.py")
+    match = re.search(r'^__version__\s*=\s*"([^"]+)"', content, re.MULTILINE)
+    if not match:
+        raise RuntimeError("Unable to find __version__ in gottcha/gottcha2.py")
+    return match.group(1)
 
 setup(
-    name="GOTTCHA2",
-    version=version,
+    name="gottcha2",
+    version=read_version(),
+    description="GOTTCHA2: Genomic Origin Through Taxonomic CHAllenge v2",
+    long_description=read_text("README.md"),
+    long_description_content_type="text/markdown",
+    python_requires=">=3.8",
     author="Po-E Li",
     author_email="po-e@lanl.gov",
-    description="GOTTCHA2: Genomic Origin Through Taxonomic CHAllenge v2",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
     license="BSD-3-Clause",
-    keywords=['bioinformatics', 'taxonomy', 'profiler', 'metagenomics', 'microbiome'],
     url="https://github.com/poeli/GOTTCHA2",
     project_urls={
-        "Bug Reports": "https://github.com/poeli/GOTTCHA2/issues",
+        "Homepage": "https://github.com/poeli/GOTTCHA2",
         "Source": "https://github.com/poeli/GOTTCHA2",
+        "Issues": "https://github.com/poeli/GOTTCHA2/issues",
         "Documentation": "https://github.com/poeli/GOTTCHA2/blob/master/README.md",
     },
-    packages=find_packages(exclude=['tests*', 'docs*']),
-    package_data={
-        'gottcha': ['data/*', 'templates/*'],
-    },
-    include_package_data=True,
-    python_requires=">=3.8",
-    install_requires=[
-        'numpy>=1.19.0',
-        'pandas>=1.2.0',
-        'requests>=2.25.0',
-        'biom-format>=2.1.7',
-        'pysam>=0.22.0',
-        'tqdm',
+    keywords=[
+        "bioinformatics",
+        "taxonomy",
+        "profiler",
+        "metagenomics",
+        "microbiome",
     ],
-    entry_points={
-        'console_scripts': [
-            'gottcha2=gottcha.scripts.cmd:gottcha2_command',
-        ],
-    },
-    scripts=['gottcha/scripts/gottcha2.py', 'gottcha/scripts/pull_database.py', 'gottcha/scripts/taxonomy.py', 'gottcha/scripts/cmd.py', 'gottcha/scripts/split_reads.py'],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Environment :: Console",
@@ -68,5 +55,16 @@ setup(
         "Topic :: Scientific/Engineering :: Bioinformatics",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
+    install_requires=[
+        "numpy>=1.19.0",
+        "pandas>=1.2.0",
+        "requests>=2.25.0",
+        "biom-format>=2.1.7",
+        "pysam>=0.22.0",
+        "tqdm",
+    ],
+    packages=find_packages(include=["gottcha*"], exclude=["test*", "tests*", "docs*"]),
+    include_package_data=True,
     zip_safe=False,
+    entry_points={"console_scripts": ["gottcha2=gottcha.gottcha2:cli"]},
 )

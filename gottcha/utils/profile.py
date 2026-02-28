@@ -1,0 +1,829 @@
+#!/usr/bin/env python3
+
+import argparse as ap
+import sys, os, time, subprocess
+import pandas as pd
+from pathlib import Path
+import gc
+from re import search
+from multiprocessing import Pool, set_start_method
+import logging
+from types import SimpleNamespace
+
+try:
+    # Try relative import first (for package usage)
+    import taxonomy
+    import report
+    import gottcha_sam_to_bam
+    import gottcha.utils.process_bam as process_bam
+    import ont_utils
+    import read_mapping
+    import aggregate_results
+    import extract_reads
+except ImportError:
+    # Fall back to direct import (for script usage)
+    import gottcha.utils.report as report
+    import gottcha.utils.taxonomy as taxonomy
+    import gottcha.utils.ont_utils as ont_utils
+    import gottcha.utils.gottcha_sam_to_bam as gottcha_sam_to_bam
+    import gottcha.utils.process_bam as process_bam
+    import gottcha.utils.aggregate_results as aggregate_results
+    import gottcha.utils.read_mapping as read_mapping
+    import gottcha.utils.extract_reads as extract_reads
+    from gottcha.gottcha2 import __version__
+
+def parse_args(ver, args):
+    """
+    Parse and validate command line arguments for GOTTCHA2.
+
+    This function sets up the argument parser, defines all possible command-line
+    options, parses the provided arguments, and performs validation to ensure
+    the configuration is valid and complete.
+
+    Parameters:
+        ver (str): Version string to display in help messages
+        args (list): Command line arguments to parse
+
+    Returns:
+        argparse.Namespace: Object containing all validated arguments
+
+    Raises:
+        SystemExit: If validation fails or --version is specified
+    """
+    p = ap.ArgumentParser( prog='gottcha2.py', description="""Genomic Origin Through Taxonomic CHAllenge (GOTTCHA) is an
+            annotation-independent and signature-based metagenomic taxonomic profiling tool
+            that has significantly smaller FDR than other profiling tools. This program
+            is a wrapper to map input reads to pre-computed signature databases using minimap2
+            and/or to profile mapped reads in SAM format. (VERSION: %s)""" % ver)
+
+    eg = p.add_mutually_exclusive_group( required=True )
+
+    eg.add_argument( '-i','--input', metavar='[FASTQ]', nargs='+', type=str,
+                    help="Input FASTQ/FASTA file(s). Use space to separate multiple input files.")
+
+    eg.add_argument( '-s','--sam', metavar='[SAMFILE]', type=str,
+                    help="Specify the input SAM file.")
+
+    eg.add_argument( '-b','--bam', metavar='[BAMFILE]', type=str,
+                    help="Specify the input BAM file (indexed).")
+
+    p.add_argument( '-d','--database', metavar='[GOTTCHA2_db]', type=str, default=None,
+                    help="The path and prefix of the GOTTCHA2 database.")
+
+    p.add_argument( '-l','--dbLevel', metavar='[LEVEL]', type=str, default='',
+                    choices=['superkingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species', 'strain'],
+                    help="""Specify the taxonomic level of the input database. You can choose one rank from "superkingdom", "phylum", "class", "order", "family", "genus", "species" and "strain". The value will be auto-detected if the input database ended with levels (e.g. GOTTCHA_db.species).""")
+
+    p.add_argument( '-ti','--taxInfo', metavar='[PATH]', type=str, default='',
+                    help="""Specify the path to the taxonomy information directory or file. The program will attempt to locate a matching .tax.tsv file for the specified database. If it cannot find one, it will use the ‘taxonomy_db’ directory located in the same directory as the executable by default.""")
+
+    p.add_argument( '-np','--nanopore', action="store_true",
+                    help="Indicate that the input reads are from Oxford Nanopore sequencing platform. This option enables read splitting and error rate set to 0.03 if not specified.")
+
+    p.add_argument('-e', '--extract', metavar='TAXON[,TAXON2,...]', type=str, default=None,
+                    help=(
+                        "Extract mapped reads for specific taxa to a FASTA or FASTQ file.\n"
+                        "You can specify taxa in one of the following ways:\n"
+                        "  - Comma-separated list of taxon IDs:  e.g., -e '1234,5678'\n"
+                        "  - File containing a list of taxon IDs (one per line):  e.g., -e '@taxids.txt'\n"
+                        "  - File with read limits and format: e.g., -e '@taxids.txt:1000:fasta'\n"
+                        "    This limits the number of reads extracted per taxon to <NUMBER> and outputs in <FORMAT> (fasta or fastq).\n"
+                        "  Use 'all' to extract all matching taxa/reads.\n"
+                        "[default: None]"
+                    )
+    )
+
+    p.add_argument('-ef', '--extractFullRef', action='store_true',
+                    help=(
+                        "Extract up to 20 sequences per reference from the SAM file and save them to a FASTA file. "
+                        "Equivalent to using: -e 'all:20:fasta'."
+                    )
+    )
+
+    p.add_argument('-eo', '--extractOnly', action='store_true',
+                    help='While --extract is specified, this option will only extract the reads and not perform any further processing of the SAM file.'
+    )
+
+    p.add_argument( '-fm','--format', metavar='[STR]', type=str, default='tsv',
+                    choices=['tsv','csv','biom'],
+                    help='Format of the results; available options include tsv, csv or biom. [default: tsv]')
+
+    p.add_argument( '-r','--relAbu', metavar='[FIELD]', type=str, default='DEPTH',
+                    choices=['DEPTH','READ_COUNT','GENOMIC_CONTENT_EST'],
+                    help='The field will be used to calculate relative abundance. You can specify one of the following fields: "DEPTH", "READ_COUNT", "GENOMIC_CONTENT_EST". [default: DEPTH]')
+
+    p.add_argument( '-t','--threads', metavar='<INT>', type=int, default=1,
+                    help="Number of threads [default: 1]")
+
+    p.add_argument( '-o','--outdir', metavar='[DIR]', type=str, default='.',
+                    help="Output directory [default: .]")
+
+    p.add_argument( '-p','--prefix', metavar='<STR>', type=str, required=False,
+                    help="Prefix of the output file [default: <INPUT_FILE_PREFIX>]")
+
+    p.add_argument( '-xm','--presetx', metavar='<STR>', type=str, required=False, default='sr',
+                    choices=['sr','map-pb','map-ont'],
+                    help="The preset option (-x) for minimap2. Default value 'sr' for short reads. [default: sr]")
+
+    p.add_argument( '--m2options', metavar='<STR>', type=str, required=False, default='auto',
+                    help="The minimap2 mapping options for short reads. Do not use this option unless you know what you are doing. [default: 'auto']")
+
+    p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float,
+                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0.95 for short reads, 0.9 for nanopore reads]")
+
+    p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0.95,
+                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0.95]")
+
+    p.add_argument( '-mg','--matchLength', metavar='<INT>', type=int, default=100,
+                    help="Minimum length of the alignment required to be considered a valid match. [default: 100]")
+
+    p.add_argument( '-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str, default='0.9,0.95,0.99',
+                    help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
+
+    p.add_argument( '-Mc','--minCov', metavar='<FLOAT>', type=float, default=0,
+                    help="Minimum signature coverage to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Mr','--minReads', metavar='<INT>', type=int, default=0,
+                    help="Minimum number of reads to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Ml','--minLen', metavar='<INT>', type=int, default=0,
+                    help="Minimum signature length to be considered valid in abundance calculation. [default: 0]")
+
+    p.add_argument( '-Mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
+                    help="Maximum estimated z-score for the depths of the mapped region. Set to 0 to disable. [default: 0]")
+
+    p.add_argument( '-nc','--noCutoff', action="store_true",
+                    help="Remove all cutoffs applied during the taxonomic profiling stage (alignment thresholds will remain applied). This option is equivalent to use [-Mc 0 -Mr 0 -Ml 0 -Mz 0 -ss 0,0,0]")
+
+    p.add_argument( '-a','--accList', metavar='[FILE]', required=False, type=str,
+                    help="A file of list with accession-of-interest (e.g. plasmid accessions).")
+
+    p.add_argument( '-aa','--accListAction', choices=['filter_out', 'filter_in', 'report_only'], default='report_only', type=str,
+                    help=("Action for aligned reads mapping to the accession list. "
+                          "'filter_out': discard reads matching accession-of-interest in the list. "
+                          "'filter_in': output only reads matching accession-of-interest in the list. "
+                          "'report_only': do not filter; report reads matching accession-of-interest in the list (AOI_READ_COUNT). "
+                          "[default: report_only]"))
+
+    p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
+                    help="The multiple hit removal step is automatically enabled for sequence input files and disabled for SAM files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
+
+    p.add_argument( '-er','--errorRate', metavar='<FLOAT>', type=float,
+                    help="Estimated error rate for sequencing data. [default: 0.005]")
+
+    p.add_argument( '-c','--stdout', action="store_true",
+                    help="Write on standard output.")
+
+    p.add_argument( '--mpa', action="store_true",
+                    help="Generate output in MetaPhlAn format.")
+
+    eg.add_argument( '-v','--version', action="store_true",
+                    help="Print version number.")
+
+    p.add_argument( '--silent', action="store_true",
+                    help="Disable all messages.")
+
+    p.add_argument( '--verbose', action="store_true",
+                    help="Provide verbose messages.")
+
+    p.add_argument( '--debug', action="store_true",
+                    help="Debug mode. Provide verbose running messages and keep all temporary files.")
+
+    args_parsed = p.parse_args(args)
+
+    """
+    Checking options
+    """
+    if args_parsed.version:
+        print( ver )
+        sys.exit(0)
+
+    if args_parsed.extract and args_parsed.extractFullRef:
+        p.error( '--extract and --extractFullRef are incompatible options.' )
+
+    if not args_parsed.database:
+        p.error( '--database option is missing.' )
+
+    if args_parsed.input and args_parsed.sam:
+        p.error( '--input and --sam are incompatible options.' )
+
+    if args_parsed.database:
+        #assign default path for database name
+        if "/" not in args_parsed.database and not os.path.isfile( args_parsed.database + ".mmi" ):
+            bin_dir = os.path.dirname(os.path.realpath(__file__))
+            args_parsed.database = bin_dir + "/database/" + args_parsed.database
+
+    if args_parsed.database and args_parsed.database.endswith(".mmi"):
+        args_parsed.database.replace('.mmi','')
+
+    if args_parsed.database and args_parsed.input:
+        if not os.path.isfile( args_parsed.database + ".mmi" ):
+            p.error( 'Database index %s.mmi not found.' % args_parsed.database )
+
+    if args_parsed.input:
+        validated_inputs = []
+        for path in args_parsed.input:
+            if path == '-':
+                p.error('--input does not support reading from stdin ("-"). Please provide a file path.')
+            if not os.path.isfile(path):
+                p.error(f'Input file {path} not found.')
+            validated_inputs.append(SimpleNamespace(name=os.path.abspath(path)))
+        args_parsed.input = validated_inputs
+
+    if args_parsed.sam:
+        sam_path = args_parsed.sam[0]
+        if sam_path != '-' and not os.path.isfile(sam_path):
+            p.error(f'SAM file {sam_path} not found.')
+        sam_path_name = sam_path if sam_path == '-' else os.path.abspath(sam_path)
+        args_parsed.sam = [SimpleNamespace(name=sam_path_name)]
+
+    if args_parsed.accList:
+        if not os.path.isfile(args_parsed.accList):
+            p.error(f'Accession exclusion list {args_parsed.accList} not found.')
+        args_parsed.accList = os.path.abspath(args_parsed.accList)
+
+    if args_parsed.nanopore and args_parsed.input and len(args_parsed.input) != 1:
+        p.error( '--nanopore option requires a single input read file.' )
+
+    if not args_parsed.prefix:
+        if args_parsed.input:
+            name = search(r'([^\/\.]+)\..*$', args_parsed.input[0].name )
+            args_parsed.prefix = name.group(1)
+        elif args_parsed.sam:
+            name = search(r'([^\/]+).\w+.\w+$', args_parsed.sam )
+            args_parsed.prefix = name.group(1)
+        elif args_parsed.bam:
+            name = search(r'([^\/]+).\w+.\w+$', args_parsed.bam )
+            args_parsed.prefix = name.group(1)
+        else:
+            args_parsed.prefix = "GOTTCHA_"
+
+    if not args_parsed.dbLevel:
+        if args_parsed.database:
+            major_ranks = {"superkingdom":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7, "strain":8}
+            parts = args_parsed.database.split('.')
+            for part in parts:
+                if part in major_ranks:
+                    args_parsed.dbLevel = part
+                    break
+        elif args_parsed.sam:
+            name = search(r'\.gottcha_(\w+).sam$', args_parsed.sam[0].name )
+            try:
+                args_parsed.dbLevel = name.group(1)
+            except:
+                pass
+        elif args_parsed.bam:
+            name = search(r'\.gottcha_(\w+).bam$', args_parsed.bam[0].name )
+            try:
+                args_parsed.dbLevel = name.group(1)
+            except:
+                pass
+
+        if not args_parsed.dbLevel:
+            p.error( '--dbLevel is missing and cannot be auto-detected.' )
+
+    if args_parsed.removeMultipleHits == 'auto':
+        if args_parsed.input:
+            args_parsed.removeMultipleHits = "yes"
+        else:
+            args_parsed.removeMultipleHits = "no"
+
+    if args_parsed.matchIdentity:
+        if args_parsed.matchIdentity < 0 or args_parsed.matchIdentity > 1:
+            p.error( '--matchIdentity must be between 0 and 1.' )
+
+    if args_parsed.matchIdentity is None:
+         if args_parsed.nanopore:
+            args_parsed.matchIdentity = 0.85
+            args_parsed.matchFraction = 0
+         else:
+            args_parsed.matchIdentity = 0.95
+
+    if args_parsed.extractFullRef:
+        args_parsed.extract = 'all:20:fasta'
+
+    if args_parsed.noCutoff:
+        args_parsed.sniScore = '0,0,0'
+
+    if args_parsed.m2options == 'auto':
+        args_parsed.m2options = '-s120'
+
+    if not args_parsed.errorRate:
+        if args_parsed.nanopore:
+            args_parsed.errorRate = 0.03
+        else:
+            args_parsed.errorRate = 0.005
+
+    return args_parsed
+
+
+def dependency_check(cmd: str) -> None:
+    """
+    Verify that external dependencies are available in the system.
+
+    Attempts to execute the specified command with --help and checks if it runs
+    successfully. Exits the program if the command is not found or fails.
+
+    Parameters:
+        cmd (str): Command to check
+
+    Returns:
+        None
+
+    Raises:
+        SystemExit: If the command is not found or fails
+    """
+    try:
+        subprocess.check_call([cmd, "--help"], stdout=subprocess.DEVNULL)
+    except Exception as e:
+        sys.stderr.write(f"[ERROR] {cmd}: {e}\n")
+        sys.exit(1)
+
+
+def time_spend(start: float) -> str:
+    """
+    Calculate and format elapsed time since a given start time.
+
+    Parameters:
+        start (float): Starting time in seconds (as returned by time.time())
+
+    Returns:
+        str: Formatted time string in HH:MM:SS format
+    """
+    done = time.time()
+    elapsed = done - start
+    return time.strftime( "%H:%M:%S", time.gmtime(elapsed) )
+
+
+def load_acc_list(filepath: str) -> set[str]:
+    """
+    Load a list of accession numbers to exclude from processing.
+
+    Reads a file containing accession numbers (one per line) and returns them
+    as a set for efficient lookup during processing. Empty lines are ignored.
+
+    Parameters:
+        filepath (str): Path to the file containing accession numbers to exclude
+
+    Returns:
+        set: Set of accession numbers to exclude. Returns empty set if input file is empty.
+
+    Example:
+        exclude_list = load_acc_list('exclude.txt')
+    """
+    with open(filepath) as f:
+        acc_list = f.read().splitlines()
+
+    if len(acc_list) == 0:
+        logging.warning(f"Exclude accession list is empty.")
+        return set()
+    else:
+        return set(acc_list)
+
+
+def load_database_stats(db_stats_file: str) -> pd.DataFrame:
+    """
+    Load database signature statistics from a stats file.
+
+    Reads a tab-delimited stats file containing information about
+    taxonomic signatures and their lengths.
+
+    Parameters:
+        db_stats_file (str): Path to the database stats file
+
+    Returns:
+        pd.DataFrame: df indexed with taxid, contains signature lengths and genome sizes
+
+    Note:
+        The input stats file is an 9-column tab-delimited file with:
+        1. Rank
+        2. Name
+        3. Taxid
+        4. Superkingdom
+        5. NumOfSeq
+        6. Max
+        7. Min
+        8. TotalLength
+        9. GenomeSize
+       10. Note (optional)
+    """
+
+    # Determine the number of columns in the stats file
+    header = pd.read_csv(db_stats_file, nrows=0, sep='\t', header=None)
+    valid_col_count = len(header.columns)
+
+    usecols = [0, 2, 7, 8]
+    names = ['DB_level', 'Taxid', 'TotalLength', 'Note']
+
+    if valid_col_count == 10:
+        usecols=[0, 2, 7, 8, 9]
+        names=['DB_level', 'Taxid', 'TotalLength', 'GenomeSize', 'Note']
+
+    # Set header to None to support files without headers
+    df_stats = pd.read_csv(db_stats_file,
+                           low_memory=False,
+                           sep='\t',
+                           header=None,
+                           usecols=usecols,
+                           names=names,
+                           dtype={'DB_level': str, 'Taxid': str},
+                           index_col='Taxid')
+
+    # If 'Note' column is not present, create it with empty strings
+    if not 'Note' in df_stats:
+        df_stats['Note'] = ''
+    if not 'GenomeSize' in df_stats:
+        df_stats['GenomeSize'] = 0
+
+    # Remove the row with index 'Taxid' if it exists
+    # This is to handle the case when the stats file having the header
+    if 'Taxid' in df_stats.index:
+        df_stats = df_stats.drop('Taxid')
+
+    # Make sure the format is consistent
+    try:
+        df_stats['TotalLength'] = pd.to_numeric(df_stats['TotalLength'], errors='raise')
+    except ValueError:
+        logging.error(f"Error processing stats file. Please check the format of the file.")
+        sys.exit(1)
+
+    # This is to handle the case when the stats file does not have GenomeSize column
+    # In that case, the 'Note' column will be loaded as 'GenomeSize' and filled with 0
+    df_stats['GenomeSize'] = pd.to_numeric(df_stats['GenomeSize'], errors='coerce')
+    df_stats['GenomeSize'] = df_stats['GenomeSize'].fillna(0).astype(int)
+
+    return df_stats
+
+
+def print_message(msg, silent, start, logfile, errorout=0):
+    """
+    Print and log a timestamped message.
+
+    Writes a message to the log file and optionally to stderr. Can also
+    terminate the program with an error message.
+
+    Parameters:
+        msg (str): Message to print
+        silent (bool): If True, suppress output to stderr
+        start (float): Start time for timestamp calculation
+        logfile (str): Path to the log file
+        errorout (int): If non-zero, exit with error after printing
+
+    Returns:
+        None
+
+    Raises:
+        SystemExit: If errorout is non-zero
+    """
+    message = "[%s] %s\n" % (time_spend(start), msg)
+
+    with open( logfile, "a" ) as f:
+        f.write( message )
+        f.close()
+
+    if errorout:
+        sys.exit( message )
+    elif not silent:
+        sys.stderr.write( message )
+
+
+def main(args):
+    """
+    Main execution function for GOTTCHA2.
+    """
+    global argvs
+    global logfile
+    global begin_t
+    global df_stats
+    global acc_list
+
+    argvs = parse_args( __version__, args )
+    begin_t  = time.time()
+    samfile  = argvs.sam if argvs.sam else f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
+    bamfile  = argvs.bam if argvs.bam else f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.bam"
+    logfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.log"
+    set_start_method("fork") # for default multiprocessing method
+    acc_list = set()
+    split_read_flag = False
+    res_df = pd.DataFrame() # aggregated restuls
+
+    logging_level = logging.WARNING
+
+    if argvs.debug:
+        logging_level = logging.DEBUG
+    elif argvs.silent:
+        logging_level = logging.FATAL
+    elif argvs.verbose:
+        logging_level = logging.INFO
+
+    logging.basicConfig(
+        level=logging_level,
+        format='%(asctime)s [%(levelname)s] [%(module)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M',
+    )
+
+    #dependency check
+    if sys.version_info < (3,8):
+        sys.exit("[ERROR] Python 3.8 or above is required.")
+
+    dependency_check("minimap2")
+    dependency_check("samtools")
+
+    #prepare output object
+    argvs.relAbu = argvs.relAbu.upper()
+    outfile_full = "%s/%s.full.tsv" % (argvs.outdir, argvs.prefix)
+    outfile_lineage = "%s/%s.lineage.tsv" % (argvs.outdir, argvs.prefix)
+    outfile_mpa = "%s/%s.mpa.tsv" % (argvs.outdir, argvs.prefix)
+
+    # remove previous log file if exists
+    if os.path.isfile(logfile):
+        os.remove(logfile)
+
+    out_fp = sys.stdout
+    outfile = "STDOUT"
+
+    if not argvs.stdout and not argvs.extractOnly:
+        #create output directory if not exists
+        if not os.path.exists(argvs.outdir):
+            os.makedirs(argvs.outdir)
+
+        outfile = "%s/%s.tsv" % (argvs.outdir, argvs.prefix)
+        if argvs.format == "csv":
+
+            outfile = "%s/%s.csv" % (argvs.outdir, argvs.prefix)
+        elif argvs.format == "biom":
+            outfile = "%s/%s.biom" % (argvs.outdir, argvs.prefix)
+
+        out_fp = open(outfile, 'w')
+
+    # display the command line
+    logging.info( ' '.join(sys.argv) )
+
+    print_message( f"GOTTCHA (v{__version__})", argvs.silent, begin_t, logfile )
+    print_message( f"Arguments and dependencies checked:", argvs.silent, begin_t, logfile )
+    print_message( f"    Database           : {argvs.database}",    argvs.silent, begin_t, logfile )
+    print_message( f"    Database level     : {argvs.dbLevel}",     argvs.silent, begin_t, logfile )
+    print_message( f"    Abundance          : {argvs.relAbu}",      argvs.silent, begin_t, logfile )
+    print_message( f"    Output directory   : {argvs.outdir}",      argvs.silent, begin_t, logfile )
+    print_message( f"    Output prefix      : {argvs.prefix}",      argvs.silent, begin_t, logfile )
+    print_message( f"    Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile )
+    print_message( f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile )
+    if argvs.input:
+        print_message( f"    Input Reads        : {[x.name for x in argvs.input]}",     argvs.silent, begin_t, logfile )
+    if argvs.sam:
+        print_message( f"    Input SAM File     : {samfile}",           argvs.silent, begin_t, logfile )
+    if argvs.bam:
+        print_message( f"    Input BAM File     : {bamfile}",           argvs.silent, begin_t, logfile )
+    if argvs.nanopore:
+        print_message( f"    Nanopore Mode      : Enabled",              argvs.silent, begin_t, logfile )
+    if argvs.errorRate >= 0.0:
+        print_message( f"    Read Error Rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile )
+    if argvs.accList:
+        print_message( f"    AOI List           : {argvs.accList}", argvs.silent, begin_t, logfile )
+    if argvs.accList:
+        print_message( f"    AOI Reads Action   : {argvs.accListAction}", argvs.silent, begin_t, logfile )
+    if argvs.extract:
+        print_message( f"    Extract Taxa       : {argvs.extract}",     argvs.silent, begin_t, logfile )
+    if argvs.minCov > 0:
+        print_message( f"    Minimal SIG Cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile )
+    if argvs.minLen > 0:
+        print_message( f"    Minimal SIG Length : {argvs.minLen}",      argvs.silent, begin_t, logfile )
+    if argvs.minReads > 0:
+        print_message( f"    Minimal Reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile )
+    if argvs.matchFraction > 0:
+        print_message( f"    Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile )
+    if argvs.matchIdentity > 0:
+        print_message( f"    Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile )
+    if argvs.matchLength > 0:
+        print_message( f"    Min Match Length   : {argvs.matchLength}", argvs.silent, begin_t, logfile )
+    if argvs.maxZscore > 0:
+        print_message( f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile )
+
+    #load taxonomy
+    print_message( "Loading taxonomy information...", argvs.silent, begin_t, logfile )
+    custom_taxa_tsv = None
+    dbpath = None
+    if os.path.isdir(argvs.taxInfo):
+        dbpath = argvs.taxInfo
+    elif os.path.isfile(argvs.taxInfo):
+        custom_taxa_tsv = argvs.taxInfo
+    elif os.path.isfile( argvs.database + ".tax.tsv" ):
+        custom_taxa_tsv = argvs.database + ".tax.tsv"
+
+    logging.info(f"Taxonomy file: {custom_taxa_tsv}")
+
+    taxonomy.loadTaxonomy(dbpath=dbpath,
+                    cus_taxonomy_file=custom_taxa_tsv,
+                    auto_download=False)
+    print_message( f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile )
+
+    #load database stats
+    print_message( "Loading database stats...", argvs.silent, begin_t, logfile )
+    if os.path.isfile( argvs.database + ".stats" ):
+        df_stats = load_database_stats(argvs.database+".stats")
+    else:
+        print_message( f"ERROR: {argvs.database+'.stats'} not found.", argvs.silent, begin_t, logfile, errorout=1)
+
+    print_message( f" - {df_stats.shape[0]} entries loaded.", argvs.silent, begin_t, logfile )
+    print_message( f" - signatures at {df_stats['DB_level'].unique().tolist()} levels loaded.", argvs.silent, begin_t, logfile )
+
+    if argvs.accList:
+        print_message( "Loading accession#s of interest list...", argvs.silent, begin_t, logfile )
+        acc_list = load_acc_list(argvs.accList)
+        print_message( f" - {len(acc_list)} accession#s of interest loaded.", argvs.silent, begin_t, logfile )
+
+    #main process
+    if argvs.input:
+        # if nanopore option is on, preprocessing reads
+        if argvs.nanopore:
+            print_message( "Checking nanopore read files...", argvs.silent, begin_t, logfile )
+            argvs.input = ont_utils.preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
+            split_read_flag = True
+
+        print_message( "Running read-mapping...", argvs.silent, begin_t, logfile )
+        exitcode, cmd, msg = read_mapping.minimap2( argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
+        gc.collect()
+        print_message( f"Logfile saved to {logfile}.", argvs.silent, begin_t, logfile )
+        logging.info( f"COMMAND: {cmd}" )
+
+        if exitcode != 0:
+            # if size of the samfile is zero
+            sys.exit( "[%s] ERROR: error occurred while running read mapping (exit: %s, message: %s).\n" % (time_spend(begin_t), exitcode, msg) )
+        else:
+            print_message( f"Done mapping reads to {argvs.dbLevel} signature database.", argvs.silent, begin_t, logfile )
+            print_message( f"Mapped SAM file saved to {samfile}.", argvs.silent, begin_t, logfile )
+
+    # remove multiple hits
+    if argvs.removeMultipleHits == 'yes':
+        # remove multiple hits from the SAM file
+        print_message( "Removing multiple hits from SAM file...", argvs.silent, begin_t, logfile )
+        samfile_output = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
+        samfile_temp = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
+        flag, aln_count, top_hits_count = read_mapping.post_processing_sam(samfile, samfile_temp)
+        if flag:
+            os.rename(samfile_temp, samfile_output)
+            samfile = samfile_output
+            # Note:
+            # When input of the gottcha2 is a SAM file and new outdir/prefix is provided, the output will be saved to that location.
+            # If not, the output will overwrite the original SAM file.
+            print_message( f" - {aln_count} total alignments", argvs.silent, begin_t, logfile )
+            print_message( f" - {top_hits_count} best hits among index-partitions", argvs.silent, begin_t, logfile )
+
+        gc.collect()
+
+    # preprocess SAM file for nanopore reads
+    if argvs.nanopore:
+        # remove inconsistent read chunks from the SAM file
+        print_message( "Removing inconsistent read chunks from SAM file...", argvs.silent, begin_t, logfile )
+        samfile_output = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
+        samfile_temp = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
+        flag, tol_chunks_count, tol_chunks_qualified = ont_utils.split_reads_samfile_postprocessing(samfile, samfile_temp)
+        if flag:
+            os.rename(samfile_temp, samfile_output)
+            samfile = samfile_output
+        print_message( f" - {tol_chunks_count} mapped read chunks processed", argvs.silent, begin_t, logfile )
+        print_message( f" - {tol_chunks_count-tol_chunks_qualified} inconsistent hits removed", argvs.silent, begin_t, logfile )
+        gc.collect()
+
+    # processing SAM file and generate results
+    if not argvs.extractOnly:
+        if os.path.isfile(os.path.abspath(samfile)):
+            print_message( "Converting to BAM file...", argvs.silent, begin_t, logfile )
+            gottcha_sam_to_bam.convert_sam_to_bam(input_sam=os.path.abspath(samfile),
+                                                  output_bam=os.path.abspath(bamfile),
+                                                  threads=argvs.threads,
+                                                  quiet=argvs.silent)
+            print_message( f"BAM file saved to {bamfile}...", argvs.silent, begin_t, logfile )
+            
+            file_path = Path(samfile)
+            if file_path.exists():
+                file_path.unlink()
+
+        if Path(bamfile).exists() and Path(f"{bamfile}.bai").exists():
+            print_message( "Processing alignments...", argvs.silent, begin_t, logfile )
+            ref_chunk_results = process_bam.parse_aln_from_bam(bam_path=bamfile,
+                                                             processes=argvs.threads,
+                                                             min_frac=argvs.matchFraction,
+                                                             min_idt=argvs.matchIdentity,
+                                                             min_alen=argvs.matchLength,
+                                                             split_read_flag=split_read_flag)
+
+            str_df, aoi_read_count = aggregate_results.group_refs_to_strains(ref_chunk_results, acc_list, argvs.accListAction, df_stats)
+
+            tol_alignment_count = str_df['READ_COUNT'].sum()
+            tol_invalid_match_count = str_df['INVALID_ALNS'].sum()
+
+            print_message( f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile )
+            print_message( f" - {tol_alignment_count} qualified alignments processed", argvs.silent, begin_t, logfile )
+
+            gc.collect()
+
+            if not tol_alignment_count:
+                print_message( "No qualified alignments found. Stopping.", argvs.silent, begin_t, logfile )
+                sys.exit(0)
+
+            # Set SNI-SCORE default to 0.8, species 0.95, strain 0.99
+            if ',' not in argvs.sniScore:
+                argvs.sniScore = ','.join([argvs.sniScore]*3)
+            elif argvs.sniScore.count(',') == 1:
+                argvs.sniScore = argvs.sniScore + ',0.99'
+
+            (sni_score_cutoff, sni_score_species, sni_score_strain) = [float(x) for x in argvs.sniScore.split(',')]
+
+            # aggregate the results
+            _args = (str_df,
+                     argvs.relAbu,
+                     argvs.dbLevel,
+                     argvs.minCov,
+                     argvs.minReads,
+                     argvs.minLen,
+                     argvs.maxZscore,
+                     sni_score_species,
+                     sni_score_strain,
+                     sni_score_cutoff,
+                     argvs.errorRate)
+            res_df, aoi_read_count = aggregate_results.aggregate_taxonomy(*_args)
+
+            if acc_list:
+                print_message(f" - {aoi_read_count} reads mapped to accession-of-interest", argvs.silent, begin_t, logfile)
+                read_count_after_aoi = tol_alignment_count
+                if argvs.accListAction == 'filter_out':
+                    read_count_after_aoi = tol_alignment_count - aoi_read_count
+                elif argvs.accListAction == 'filter_in':
+                    read_count_after_aoi = aoi_read_count
+                print_message(f" - {read_count_after_aoi} reads after applying accession-of-interest action ({argvs.accListAction})", argvs.silent, begin_t, logfile)
+
+            print_message("Done taxonomy aggregation.", argvs.silent, begin_t, logfile)
+
+            if not len(res_df):
+                print_message("No qualified taxonomy profiled.", argvs.silent, begin_t, logfile)
+            else:
+                # generate output results
+                if argvs.format == "biom":
+                    report.generate_biom_file(res_df, out_fp, argvs.dbLevel, argvs.prefix)
+                else:
+                    report.generate_report_file(res_df, out_fp, outfile_full, argvs.format)
+                # generate lineage file
+                target_idx = (res_df['LEVEL']==argvs.dbLevel) & \
+                                (res_df['NOTE'].str.contains('Filtered out', na=False) == False) & \
+                                (res_df['NOTE'].str.contains('Not shown', na=False) == False)
+                target_df = res_df.loc[target_idx, ['ABUNDANCE','TAXID']]
+                tax_num = len(target_df)
+
+                print_message(f"{tax_num} qualified {argvs.dbLevel} profiled.", argvs.silent, begin_t, logfile)
+
+                if tax_num:
+                    report.generate_lineage_file(target_df, outfile_lineage)
+
+                    if argvs.mpa:
+                        target_df = res_df.loc[target_idx, ['TAXID', 'REL_ABUNDANCE', 'REL_ABUNDANCE_GC','READ_COUNT', 'SIG_COV']]
+                        report.generate_mpa_file(target_df, outfile_mpa)
+                        print_message(f"MPA format file saved to {outfile_mpa}.", argvs.silent, begin_t, logfile)
+
+                print_message(f"Results saved to {outfile}.", argvs.silent, begin_t, logfile)
+        else:
+            print_message( f"ERROR: BAM file {bamfile} or its index not found.", argvs.silent, begin_t, logfile, errorout=1)
+            print_message("GOTTCHA2 stopped.", argvs.silent, begin_t, logfile)
+            sys.exit(0)
+
+    # extracting reads
+    if argvs.extract:
+        (taxa_arg, max_per_taxon, out_format) = (argvs.extract.split(':', maxsplit=2) + ['all', 'fasta'])[:3]
+
+        print_message( f"Extracting {max_per_taxon} sequences per taxa in {out_format} format...", argvs.silent, begin_t, logfile )
+
+        full_report_file = ""
+
+        if max_per_taxon.isdigit() or max_per_taxon == 'all':
+            max_per_taxon = int(max_per_taxon) if max_per_taxon != 'all' else 0
+
+        if argvs.extractOnly:
+            full_report_file = bamfile.replace(".bam", ".full.tsv")
+
+        taxa_dict, qualified_taxids = extract_reads.parse_taxids(taxa_arg, res_df, full_report_file)
+
+        if not len(qualified_taxids):
+            print_message("No qualified taxonomy profiled.", argvs.silent, begin_t, logfile)
+
+        if not argvs.stdout:
+            outfile = f"{argvs.outdir}/{argvs.prefix}.extract.{out_format.lower()}"
+            out_fp = open(outfile, 'w')
+
+            _args = (os.path.abspath(bamfile),
+                       taxa_dict,
+                       qualified_taxids,
+                       out_fp,
+                       argvs.threads,
+                       argvs.matchFraction,
+                       argvs.matchIdentity,
+                       argvs.matchLength,
+                       max_per_taxon,
+                       acc_list,
+                       argvs.accListAction,
+                       out_format)
+            taxon_count, seq_count = extract_reads.extract_sequences_by_taxonomy(*_args)
+            print_message(f"Done extracting {seq_count} sequences from {taxon_count} taxa to '{outfile}'.",
+                            argvs.silent, begin_t, logfile)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
