@@ -62,7 +62,7 @@ def cli():
     elif args[0] == "version":
         print(f"{__version__}")
     elif args[0] == "extract":
-        profile.main(args)
+        profile.main(args + ["--extractOnly"])
 
     else:
         print(f"Error: '{args[0]}' is not a valid command")

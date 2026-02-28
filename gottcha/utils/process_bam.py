@@ -77,7 +77,7 @@ def _init_worker(
     }
 
 
-def _process_chunk(task: Tuple[str, int, int]) -> Tuple[str, int, int, int, int, int, int, float]:
+def _process_chunk(task: Tuple[str, int, int]) -> List:
     """
     Process one (rname, start0, end0) chunk.
 
@@ -239,7 +239,7 @@ def _process_chunk(task: Tuple[str, int, int]) -> Tuple[str, int, int, int, int,
     # i.e. mm / depth > 0.5  ->  2*mm > depth
     consensus_diff = int(np.count_nonzero((depth > 0) & (mm * 2 > depth)))
 
-    gc.collect()
+    logging.debug(f"Processed {rname}: {numreads} reads, {covbases} covbases, {mismatches_total} mismatches, {consensus_diff} consensus_diff, {mapped_bases} mapped_bases, {invalid_alns} invalid_alns")
 
     return [rname,
             start0,
@@ -294,7 +294,7 @@ def parse_aln_from_bam(bam_path: str,
         print(f"ERROR: Failed to open BAM: {e}", file=sys.stderr)
         return 2
 
-    # logging.debug(f"Starting BAM parsing with {processes} processes...")
+    logging.debug(f"Parsing {len(references)} references with {processes} processes...")
 
     tasks = _iter_tasks(references, lengths, chunk_size)
 
@@ -338,7 +338,7 @@ def parse_aln_from_bam(bam_path: str,
         ref_chunk_results.append(header)
         mapper = pool.imap_unordered
         for result in mapper(_process_chunk, tasks, chunksize=imap_chunksize):
-            result[1] +=  1 # start0
+            result[1] +=  1 # start0 to 1-based startpos for output (endpos remains end0, which is exclusive in both conventions)
             ref_chunk_results.append(result)
 
     finally:
