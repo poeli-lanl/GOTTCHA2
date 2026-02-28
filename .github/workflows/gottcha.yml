@@ -80,8 +80,8 @@ jobs:
         working-directory: test
         run: |
           set -euxo pipefail
-          gottcha2 profile -d gottcha2_database_test/gottcha_db.species.fna -i SRR12689945_1_1k.fastq.gz -nc -o output
           gottcha2 profile -d gottcha2_database_test/gottcha_db.species.fna -i gottcha2_database_test/gottcha_db.species.fna.gz -np -o output
+          gottcha2 profile -d gottcha2_database_test/gottcha_db.species.fna -i SRR12689945_1_1k.fastq.gz -nc -o output
           gottcha2 profile -d gottcha2_database_test/gottcha_db.species.fna -b output/SRR12689945_1_1k.gottcha_species.bam -o output
           grep 'Orthoebolavirus zairense' output/SRR12689945_1_1k.tsv
 

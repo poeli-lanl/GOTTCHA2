@@ -58,13 +58,13 @@ def parse_args(ver, args):
             is a wrapper to map input reads to pre-computed signature databases using minimap2
             and/or to profile mapped reads in SAM format. (VERSION: %s)""" % ver)
 
-    eg = p.add_mutually_exclusive_group( required=True )
+    eg = p.add_mutually_exclusive_group( required=True)
 
     eg.add_argument( '-i','--input', metavar='[FASTQ]', nargs='+', type=str,
                     help="Input FASTQ/FASTA file(s). Use space to separate multiple input files.")
 
     eg.add_argument( '-b','--bam', metavar='[BAMFILE]', type=str,
-                    help="Specify the input BAM file (indexed).")
+                    help="Specify the input sorted BAM file (indexed).")
 
     p.add_argument( '-d','--database', metavar='[GOTTCHA2_db]', type=str, default=None,
                     help="The path and prefix of the GOTTCHA2 database.")
@@ -89,19 +89,19 @@ def parse_args(ver, args):
                         "    This limits the number of reads extracted per taxon to <NUMBER> and outputs in <FORMAT> (fasta or fastq).\n"
                         "  Use 'all' to extract all matching taxa/reads.\n"
                         "[default: None]"
-                    )
-    )
+                   )
+   )
 
     p.add_argument('-ef', '--extractFullRef', action='store_true',
                     help=(
                         "Extract up to 20 sequences per reference from the alignment file and save them to a FASTA file. "
                         "Equivalent to using: -e 'all:20:fasta'."
-                    )
-    )
+                   )
+   )
 
     p.add_argument('-eo', '--extractOnly', action='store_true',
                     help='While --extract is specified, this option will only extract the reads and not perform any further processing of the alignment file.'
-    )
+   )
 
     p.add_argument( '-fm','--format', metavar='[STR]', type=str, default='tsv',
                     choices=['tsv','csv','biom'],
@@ -194,21 +194,21 @@ def parse_args(ver, args):
     Checking options
     """
     if args_parsed.version:
-        print( ver )
+        print( ver)
         sys.exit(0)
 
     if args_parsed.extract and args_parsed.extractFullRef:
-        p.error( '--extract and --extractFullRef are incompatible options.' )
+        p.error( '--extract and --extractFullRef are incompatible options.')
 
     if not args_parsed.database:
-        p.error( '--database option is missing.' )
+        p.error( '--database option is missing.')
 
     if args_parsed.input and args_parsed.bam:
-        p.error( '--input / --bam are incompatible options.' )
+        p.error( '--input / --bam are incompatible options.')
 
     if args_parsed.database:
         #assign default path for database name
-        if "/" not in args_parsed.database and not os.path.isfile( args_parsed.database + ".mmi" ):
+        if "/" not in args_parsed.database and not os.path.isfile( args_parsed.database + ".mmi"):
             bin_dir = os.path.dirname(os.path.realpath(__file__))
             args_parsed.database = bin_dir + "/database/" + args_parsed.database
 
@@ -216,8 +216,8 @@ def parse_args(ver, args):
         args_parsed.database.replace('.mmi','')
 
     if args_parsed.database and args_parsed.input:
-        if not os.path.isfile( args_parsed.database + ".mmi" ):
-            p.error( 'Database index %s.mmi not found.' % args_parsed.database )
+        if not os.path.isfile( args_parsed.database + ".mmi"):
+            p.error( 'Database index %s.mmi not found.' % args_parsed.database)
 
     if args_parsed.input:
         validated_inputs = []
@@ -230,7 +230,7 @@ def parse_args(ver, args):
         args_parsed.input = validated_inputs
 
     if args_parsed.bam:
-        bam_path = args_parsed.bam[0]
+        bam_path = args_parsed.bam
         if bam_path != '-' and not os.path.isfile(bam_path):
             p.error(f'BAM file {bam_path} not found.')
         bam_path_name = bam_path if bam_path == '-' else os.path.abspath(bam_path)
@@ -242,14 +242,14 @@ def parse_args(ver, args):
         args_parsed.accList = os.path.abspath(args_parsed.accList)
 
     if args_parsed.nanopore and args_parsed.input and len(args_parsed.input) != 1:
-        p.error( '--nanopore option requires a single input read file.' )
+        p.error( '--nanopore option requires a single input read file.')
 
     if not args_parsed.prefix:
         if args_parsed.input:
-            name = search(r'([^\/\.]+)\..*$', args_parsed.input[0].name )
+            name = search(r'([^\/\.]+)\..*$', args_parsed.input[0].name)
             args_parsed.prefix = name.group(1)
         elif args_parsed.bam:
-            name = search(r'([^\/]+).\w+.\w+$', args_parsed.bam )
+            name = search(r'([^\/]+)\.\w+\.bam$', args_parsed.bam[0].name)
             args_parsed.prefix = name.group(1)
         else:
             args_parsed.prefix = "GOTTCHA_"
@@ -263,14 +263,14 @@ def parse_args(ver, args):
                     args_parsed.dbLevel = part
                     break
         elif args_parsed.bam:
-            name = search(r'\.gottcha_(\w+).bam$', args_parsed.bam[0].name )
+            name = search(r'\.gottcha_(\w+).bam$', args_parsed.bam[0].name)
             try:
                 args_parsed.dbLevel = name.group(1)
             except:
                 pass
 
         if not args_parsed.dbLevel:
-            p.error( '--dbLevel is missing and cannot be auto-detected.' )
+            p.error( '--dbLevel is missing and cannot be auto-detected.')
 
     if args_parsed.removeMultipleHits == 'auto':
         if args_parsed.input:
@@ -280,7 +280,7 @@ def parse_args(ver, args):
 
     if args_parsed.matchIdentity:
         if args_parsed.matchIdentity < 0 or args_parsed.matchIdentity > 1:
-            p.error( '--matchIdentity must be between 0 and 1.' )
+            p.error( '--matchIdentity must be between 0 and 1.')
 
     if args_parsed.matchIdentity is None:
          if args_parsed.nanopore:
@@ -297,7 +297,7 @@ def parse_args(ver, args):
         if not args_parsed.extract:
             error_message += "--extract must be specified\n"
 
-        p.error( error_message )
+        p.error( error_message)
 
     if args_parsed.noCutoff:
         args_parsed.sniScore = '0,0,0'
@@ -349,7 +349,7 @@ def time_spend(start: float) -> str:
     """
     done = time.time()
     elapsed = done - start
-    return time.strftime( "%H:%M:%S", time.gmtime(elapsed) )
+    return time.strftime( "%H:%M:%S", time.gmtime(elapsed))
 
 
 def load_acc_list(filepath: str) -> set[str]:
@@ -474,14 +474,14 @@ def print_message(msg, silent, start, logfile, errorout=0):
     """
     message = "[%s] %s\n" % (time_spend(start), msg)
 
-    with open( logfile, "a" ) as f:
-        f.write( message )
+    with open( logfile, "a") as f:
+        f.write( message)
         f.close()
 
     if errorout:
-        sys.exit( message )
+        sys.exit( message)
     elif not silent:
-        sys.stderr.write( message )
+        sys.stderr.write( message)
 
 
 def main(args):
@@ -494,9 +494,9 @@ def main(args):
     global df_stats
     global acc_list
 
-    argvs = parse_args( __version__, args )
+    argvs = parse_args( __version__, args)
     begin_t  = time.time()
-    bamfile  = argvs.bam if argvs.bam else f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.bam"
+    bamfile  = argvs.bam[0].name if argvs.bam[0].name else f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.bam"
     samfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
     logfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.log"
     set_start_method("fork") # for default multiprocessing method
@@ -517,7 +517,7 @@ def main(args):
         level=logging_level,
         format='%(asctime)s [%(levelname)s] [%(module)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M',
-    )
+   )
 
     #dependency check
     if sys.version_info < (3,8):
@@ -554,55 +554,55 @@ def main(args):
         out_fp = open(outfile, 'w')
 
     # display the command line
-    logging.info( ' '.join(sys.argv) )
+    logging.info( ' '.join(sys.argv))
 
-    print_message( f"GOTTCHA (v{__version__})", argvs.silent, begin_t, logfile )
-    print_message( f"Arguments and dependencies checked:", argvs.silent, begin_t, logfile )
-    print_message( f"    Database           : {argvs.database}",    argvs.silent, begin_t, logfile )
-    print_message( f"    Database level     : {argvs.dbLevel}",     argvs.silent, begin_t, logfile )
-    print_message( f"    Abundance          : {argvs.relAbu}",      argvs.silent, begin_t, logfile )
-    print_message( f"    Output directory   : {argvs.outdir}",      argvs.silent, begin_t, logfile )
-    print_message( f"    Output prefix      : {argvs.prefix}",      argvs.silent, begin_t, logfile )
-    print_message( f"    Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile )
-    print_message( f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile )
+    print_message( f"GOTTCHA (v{__version__})", argvs.silent, begin_t, logfile)
+    print_message( f"Arguments and dependencies checked:", argvs.silent, begin_t, logfile)
+    print_message( f"    Database           : {argvs.database}",    argvs.silent, begin_t, logfile)
+    print_message( f"    Database level     : {argvs.dbLevel}",     argvs.silent, begin_t, logfile)
+    print_message( f"    Abundance          : {argvs.relAbu}",      argvs.silent, begin_t, logfile)
+    print_message( f"    Output directory   : {argvs.outdir}",      argvs.silent, begin_t, logfile)
+    print_message( f"    Output prefix      : {argvs.prefix}",      argvs.silent, begin_t, logfile)
+    print_message( f"    Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile)
+    print_message( f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile)
     if argvs.input:
-        print_message( f"    Input Reads        : {[x.name for x in argvs.input]}",     argvs.silent, begin_t, logfile )
+        print_message( f"    Input Reads        : {[x for x in argvs.input]}",     argvs.silent, begin_t, logfile)
     if argvs.bam:
-        print_message( f"    Input BAM File     : {bamfile}",           argvs.silent, begin_t, logfile )
+        print_message( f"    Input BAM File     : {bamfile}",           argvs.silent, begin_t, logfile)
     if argvs.nanopore:
-        print_message( f"    Nanopore Mode      : Enabled",              argvs.silent, begin_t, logfile )
+        print_message( f"    Nanopore Mode      : Enabled",              argvs.silent, begin_t, logfile)
     if argvs.errorRate >= 0.0:
-        print_message( f"    Read Error Rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile )
+        print_message( f"    Read Error Rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile)
     if argvs.accList:
-        print_message( f"    AOI List           : {argvs.accList}", argvs.silent, begin_t, logfile )
+        print_message( f"    AOI List           : {argvs.accList}", argvs.silent, begin_t, logfile)
     if argvs.accList:
-        print_message( f"    AOI Reads Action   : {argvs.accListAction}", argvs.silent, begin_t, logfile )
+        print_message( f"    AOI Reads Action   : {argvs.accListAction}", argvs.silent, begin_t, logfile)
     if argvs.extract:
-        print_message( f"    Extract Taxa       : {argvs.extract}",     argvs.silent, begin_t, logfile )
+        print_message( f"    Extract Taxa       : {argvs.extract}",     argvs.silent, begin_t, logfile)
     if argvs.minCov > 0:
-        print_message( f"    Minimal SIG Cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile )
+        print_message( f"    Minimal SIG Cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile)
     if argvs.minLen > 0:
-        print_message( f"    Minimal SIG Length : {argvs.minLen}",      argvs.silent, begin_t, logfile )
+        print_message( f"    Minimal SIG Length : {argvs.minLen}",      argvs.silent, begin_t, logfile)
     if argvs.minReads > 0:
-        print_message( f"    Minimal Reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile )
+        print_message( f"    Minimal Reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile)
     if argvs.matchFraction > 0:
-        print_message( f"    Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile )
+        print_message( f"    Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile)
     if argvs.matchIdentity > 0:
-        print_message( f"    Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile )
+        print_message( f"    Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile)
     if argvs.matchLength > 0:
-        print_message( f"    Min Match Length   : {argvs.matchLength}", argvs.silent, begin_t, logfile )
+        print_message( f"    Min Match Length   : {argvs.matchLength}", argvs.silent, begin_t, logfile)
     if argvs.maxZscore > 0:
-        print_message( f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile )
+        print_message( f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile)
 
     #load taxonomy
-    print_message( "Loading taxonomy information...", argvs.silent, begin_t, logfile )
+    print_message( "Loading taxonomy information...", argvs.silent, begin_t, logfile)
     custom_taxa_tsv = None
     dbpath = None
     if os.path.isdir(argvs.taxInfo):
         dbpath = argvs.taxInfo
     elif os.path.isfile(argvs.taxInfo):
         custom_taxa_tsv = argvs.taxInfo
-    elif os.path.isfile( argvs.database + ".tax.tsv" ):
+    elif os.path.isfile( argvs.database + ".tax.tsv"):
         custom_taxa_tsv = argvs.database + ".tax.tsv"
 
     logging.info(f"Taxonomy file: {custom_taxa_tsv}")
@@ -610,48 +610,48 @@ def main(args):
     taxonomy.loadTaxonomy(dbpath=dbpath,
                     cus_taxonomy_file=custom_taxa_tsv,
                     auto_download=False)
-    print_message( f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile )
+    print_message( f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile)
 
     #load database stats
-    print_message( "Loading database stats...", argvs.silent, begin_t, logfile )
-    if os.path.isfile( argvs.database + ".stats" ):
+    print_message( "Loading database stats...", argvs.silent, begin_t, logfile)
+    if os.path.isfile( argvs.database + ".stats"):
         df_stats = load_database_stats(argvs.database+".stats")
     else:
         print_message( f"ERROR: {argvs.database+'.stats'} not found.", argvs.silent, begin_t, logfile, errorout=1)
 
-    print_message( f" - {df_stats.shape[0]} entries loaded.", argvs.silent, begin_t, logfile )
-    print_message( f" - signatures at {df_stats['DB_level'].unique().tolist()} levels loaded.", argvs.silent, begin_t, logfile )
+    print_message( f" - {df_stats.shape[0]} entries loaded.", argvs.silent, begin_t, logfile)
+    print_message( f" - signatures at {df_stats['DB_level'].unique().tolist()} levels loaded.", argvs.silent, begin_t, logfile)
 
     if argvs.accList:
-        print_message( "Loading accession#s of interest list...", argvs.silent, begin_t, logfile )
+        print_message( "Loading accession#s of interest list...", argvs.silent, begin_t, logfile)
         acc_list = load_acc_list(argvs.accList)
-        print_message( f" - {len(acc_list)} accession#s of interest loaded.", argvs.silent, begin_t, logfile )
+        print_message( f" - {len(acc_list)} accession#s of interest loaded.", argvs.silent, begin_t, logfile)
 
     #main process
     if argvs.input:
         # if nanopore option is on, preprocessing reads
         if argvs.nanopore:
-            print_message( "Checking nanopore read files...", argvs.silent, begin_t, logfile )
+            print_message( "Checking nanopore read files...", argvs.silent, begin_t, logfile)
             argvs.input = ont_utils.preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
             split_read_flag = True
 
-        print_message( "Running read-mapping...", argvs.silent, begin_t, logfile )
+        print_message( "Running read-mapping...", argvs.silent, begin_t, logfile)
         exitcode, cmd, msg = read_mapping.minimap2( argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
-        print_message( f"Logfile saved to {logfile}.", argvs.silent, begin_t, logfile )
-        logging.info( f"COMMAND: {cmd}" )
+        print_message( f"Logfile saved to {logfile}.", argvs.silent, begin_t, logfile)
+        logging.info( f"COMMAND: {cmd}")
 
         if exitcode != 0:
             # if size of the samfile is zero
-            sys.exit( "[%s] ERROR: error occurred while running read mapping (exit: %s, message: %s).\n" % (time_spend(begin_t), exitcode, msg) )
+            sys.exit( "[%s] ERROR: error occurred while running read mapping (exit: %s, message: %s).\n" % (time_spend(begin_t), exitcode, msg))
         else:
-            print_message( f"Done mapping reads to {argvs.dbLevel} signature database.", argvs.silent, begin_t, logfile )
-            print_message( f"Mapped SAM file saved to {samfile}.", argvs.silent, begin_t, logfile )
+            print_message( f"Done mapping reads to {argvs.dbLevel} signature database.", argvs.silent, begin_t, logfile)
+            print_message( f"Mapped SAM file saved to {samfile}.", argvs.silent, begin_t, logfile)
         gc.collect()
 
     # remove multiple hits
     if argvs.removeMultipleHits == 'yes':
         # remove multiple hits from the SAM file
-        print_message( "Removing multiple hits from SAM file...", argvs.silent, begin_t, logfile )
+        print_message( "Removing multiple hits from SAM file...", argvs.silent, begin_t, logfile)
         samfile_output = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
         samfile_temp = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
         flag, aln_count, top_hits_count = read_mapping.post_processing_sam(samfile, samfile_temp)
@@ -661,34 +661,34 @@ def main(args):
             # Note:
             # When input of the gottcha2 is a SAM file and new outdir/prefix is provided, the output will be saved to that location.
             # If not, the output will overwrite the original SAM file.
-            print_message( f" - {aln_count} total alignments", argvs.silent, begin_t, logfile )
-            print_message( f" - {top_hits_count} best hits among index-partitions", argvs.silent, begin_t, logfile )
+            print_message( f" - {aln_count} total alignments", argvs.silent, begin_t, logfile)
+            print_message( f" - {top_hits_count} best hits among index-partitions", argvs.silent, begin_t, logfile)
 
         gc.collect()
 
     # preprocess SAM file for nanopore reads
     if argvs.nanopore:
         # remove inconsistent read chunks from the SAM file
-        print_message( "Removing inconsistent read chunks from SAM file...", argvs.silent, begin_t, logfile )
+        print_message( "Removing inconsistent read chunks from SAM file...", argvs.silent, begin_t, logfile)
         samfile_output = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
         samfile_temp = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
         flag, tol_chunks_count, tol_chunks_qualified = ont_utils.split_reads_samfile_postprocessing(samfile, samfile_temp)
         if flag:
             os.rename(samfile_temp, samfile_output)
             samfile = samfile_output
-        print_message( f" - {tol_chunks_count} mapped read chunks processed", argvs.silent, begin_t, logfile )
-        print_message( f" - {tol_chunks_count-tol_chunks_qualified} inconsistent hits removed", argvs.silent, begin_t, logfile )
+        print_message( f" - {tol_chunks_count} mapped read chunks processed", argvs.silent, begin_t, logfile)
+        print_message( f" - {tol_chunks_count-tol_chunks_qualified} inconsistent hits removed", argvs.silent, begin_t, logfile)
         gc.collect()
 
     # processing SAM file and generate results
     if not argvs.extractOnly:
         if os.path.isfile(os.path.abspath(samfile)):
-            print_message( "Converting to BAM file...", argvs.silent, begin_t, logfile )
+            print_message( "Converting to BAM file...", argvs.silent, begin_t, logfile)
             sam_to_bam.convert_sam_to_bam(input_sam=os.path.abspath(samfile),
                                                   output_bam=os.path.abspath(bamfile),
                                                   threads=argvs.threads,
                                                   quiet=argvs.silent)
-            print_message( f"BAM file saved to {bamfile}...", argvs.silent, begin_t, logfile )
+            print_message( f"BAM file saved to {bamfile}...", argvs.silent, begin_t, logfile)
             
             file_path = Path(samfile)
             if file_path.exists():
@@ -696,7 +696,7 @@ def main(args):
             gc.collect()
 
         if Path(bamfile).exists() and Path(f"{bamfile}.bai").exists():
-            print_message( "Processing alignments...", argvs.silent, begin_t, logfile )
+            print_message( "Processing alignments...", argvs.silent, begin_t, logfile)
             ref_chunk_results = process_bam.parse_aln_from_bam(bam_path=bamfile,
                                                              processes=argvs.threads,
                                                              min_frac=argvs.matchFraction,
@@ -709,11 +709,11 @@ def main(args):
             tol_alignment_count = str_df['READ_COUNT'].sum()
             tol_invalid_match_count = str_df['INVALID_ALNS'].sum()
 
-            print_message( f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile )
-            print_message( f" - {tol_alignment_count} qualified alignments processed", argvs.silent, begin_t, logfile )
+            print_message( f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile)
+            print_message( f" - {tol_alignment_count} qualified alignments processed", argvs.silent, begin_t, logfile)
 
             if not tol_alignment_count:
-                print_message( "No qualified alignments found. Stopping.", argvs.silent, begin_t, logfile )
+                print_message( "No qualified alignments found. Stopping.", argvs.silent, begin_t, logfile)
                 sys.exit(0)
 
             # Set SNI-SCORE default to 0.8, species 0.95, strain 0.99
@@ -784,7 +784,7 @@ def main(args):
     if argvs.extract:
         (taxa_arg, max_per_taxon, out_format) = (argvs.extract.split(':', maxsplit=2) + ['all', 'fasta'])[:3]
 
-        print_message( f"Extracting {max_per_taxon} sequences per taxa in {out_format} format...", argvs.silent, begin_t, logfile )
+        print_message( f"Extracting {max_per_taxon} sequences per taxa in {out_format} format...", argvs.silent, begin_t, logfile)
 
         full_report_file = ""
 
