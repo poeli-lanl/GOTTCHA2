@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -44,7 +44,7 @@ Issues = "https://github.com/poeli/GOTTCHA2/issues"
 Documentation = "https://github.com/poeli/GOTTCHA2/blob/master/README.md"
 
 [project.scripts]
-gottcha2 = "gottcha.utils.cmd:gottcha2_command"
+gottcha2 = "gottcha.gottcha2:cli"
 
 [tool.setuptools]
 include-package-data = true
@@ -55,4 +55,4 @@ include = ["gottcha*"]
 exclude = ["test*", "tests*", "docs*"]
 
 [tool.setuptools.dynamic]
-version = {attr = "gottcha.__version__"}
+version = {attr = "gottcha.gottcha2.__version__"}

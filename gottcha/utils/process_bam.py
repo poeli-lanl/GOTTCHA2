@@ -34,12 +34,10 @@ Output columns (TSV):
 from __future__ import annotations
 
 import argparse
-import math
 import multiprocessing as mp
 import os
 import sys
 import logging
-import pandas as pd
 from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
@@ -133,6 +131,8 @@ def _process_chunk(task: Tuple[str, int, int]) -> Tuple[str, int, int, int, int,
         if aln.mapping_quality < min_mapq:
             continue
 
+        
+
         if aln.reference_start >= start0:
             aln_starts_in_chunk_flag = True
 
@@ -143,7 +143,7 @@ def _process_chunk(task: Tuple[str, int, int]) -> Tuple[str, int, int, int, int,
                 continue
 
         if min_frac > 0.0:
-            if (aln.alen / aln.query_length) < min_frac or (aln.alen / aln.reference_length) < min_frac:
+            if (aln.alen / aln.query_length) < min_frac and (aln.alen / bam.get_reference_length(rname)) < min_frac:
                 if aln_starts_in_chunk_flag: invalid_alns += 1
                 continue
 
@@ -262,21 +262,21 @@ def _iter_tasks(references: List[str], lengths: List[int], chunk_size: int) -> I
             end0 = min(start0 + cs, rlen)
             yield (rname, start0, end0)
 
-def comp_cov_mismatches(bam_path: str,
-                        processes: int, 
-                        min_frac: float,
-                        min_idt: float,
-                        min_alen: int,
-                        min_mapq: Optional[int] = 0,
-                        htslib_threads: Optional[int] = 1,
-                        chunk_size: Optional[int] = 10_000_000,
-                        imap_chunksize: Optional[int] = 1,
-                        include_secondary: Optional[bool] = False,
-                        include_supplementary: Optional[bool] = False,
-                        include_duplicates: Optional[bool] = False,
-                        include_qcfail: Optional[bool] = False,
-                        split_read_flag: Optional[bool] = False,
-                        ) -> int:
+def parse_aln_from_bam(bam_path: str,
+                       processes: int, 
+                       min_frac: float,
+                       min_idt: float,
+                       min_alen: int,
+                       min_mapq: Optional[int] = 0,
+                       htslib_threads: Optional[int] = 1,
+                       chunk_size: Optional[int] = 10_000_000,
+                       imap_chunksize: Optional[int] = 1,
+                       include_secondary: Optional[bool] = False,
+                       include_supplementary: Optional[bool] = False,
+                       include_duplicates: Optional[bool] = False,
+                       include_qcfail: Optional[bool] = False,
+                       split_read_flag: Optional[bool] = False,
+                       ) -> int:
     if not os.path.exists(bam_path):
         print(f"ERROR: BAM not found: {bam_path}", file=sys.stderr)
         return 2
@@ -292,6 +292,8 @@ def comp_cov_mismatches(bam_path: str,
     except Exception as e:
         print(f"ERROR: Failed to open BAM: {e}", file=sys.stderr)
         return 2
+
+    # logging.debug(f"Starting BAM parsing with {processes} processes...")
 
     tasks = _iter_tasks(references, lengths, chunk_size)
 
@@ -342,143 +344,9 @@ def comp_cov_mismatches(bam_path: str,
         pool.close()
         pool.join()
 
+    logging.debug(f"Total signature fragments processed: {len(ref_chunk_results)-1}")
+
     return ref_chunk_results
-
-
-def pile_lvl_zscore(tol_bp, tol_sig_len, linear_len):
-    """
-    Calculate Z-score for the depth of coverage of mapped regions.
-    
-    This determines how unusual the coverage depth is compared to expected depth
-    based on a statistical model. Higher Z-scores may indicate biased mapping.
-    
-    Parameters:
-        tol_bp (int): Total number of mapped bases
-        tol_sig_len (int): Total length of the signature
-        linear_len (int): Linear length (de-duplicated) covered by mappings
-        
-    Returns:
-        float: Z-score for the depth distribution (or 0 if calculation fails)
-    """
-    try:
-        avg_doc = tol_bp/tol_sig_len
-        lin_doc = tol_bp/linear_len
-        v = (linear_len*(lin_doc-avg_doc)**2 + (tol_sig_len-linear_len)*(avg_doc)**2)/tol_sig_len
-        sd = math.sqrt(v)
-        if sd == 0.0:
-            return 0
-        else:
-            return (lin_doc-avg_doc)/sd
-    except:
-        return 0
-
-
-def group_refs_to_strains(ref_chunk_results, acc_list, acc_list_action, df_stats):
-    """
-    Group reference mapping results by strains and calculate strain-level statistics.
-    
-    Converts the mapping results dictionary to a pandas DataFrame and groups by
-    taxonomic identifier. Calculates various statistics including total mapped bases,
-    read counts, coverage, and depth of coverage.
-    
-    Parameters:
-        ref_chunk_results (list): List of mapping statistics for each reference fragment chunks (output from comp_cov_mismatches)
-        acc_list (list, optional): List of accessions of interest
-        acc_list_action (str, optional): Action to take with the accession list (e.g., "exclude")
-        df_stats (pandas.DataFrame): DataFrame containing genome signature statistics
-    Returns:
-        pandas.DataFrame: DataFrame with strain-level statistics
-    """
-    # covert mapping info to df
-    r_chunk_df = pd.DataFrame(ref_chunk_results[1:], columns=ref_chunk_results[0])
-
-    # retrieve sig fragment info
-    r_chunk_df['RNAME'] = r_chunk_df['RNAME'].str.rstrip('|')
-
-    r_df = r_chunk_df.groupby('RNAME').agg({
-        'COVBASES':'sum', # of covered signature bases
-        'NUMREADS':'sum', # of mapped reads
-        'MISMATCHES':'sum', # of mismatches
-        'INDELS':'sum', # of indels
-        'MAPPED_BASES':'sum', # total length of mapped bases (including matches and mismatches)
-        'CONSENSUS_DIFF':'sum', # number of positions with >50% mismatches among aligned reads
-        'INVALID_ALNS':'sum', # total invalid alignments (after filters) for this reference
-        'READLENGTH':'sum', # total length of reads
-    }).reset_index()
-
-    # add reportable read count
-    r_df['AOI_READ_COUNT'] = 0
-    aoi_read_count = 0
-
-    r_df[['ACC','RSTART','REND','TAXID']] = r_df['RNAME'].str.split('|', expand=True)
-
-    if acc_list:
-        idx = (r_df['ACC'].isin(acc_list) | r_df['RNAME'].isin(acc_list))
-        r_df.loc[idx, 'AOI_READ_COUNT'] = r_df.loc[idx, 'NUMREADS'] # report the read count for the accession#s of interest
-        aoi_read_count = r_df.loc[idx, 'NUMREADS'].sum()
-
-        if acc_list_action == 'filter_out':
-            r_df = r_df.loc[~idx] # set mapped bases, read count, mismatch and covered sig len to 0 for the accession#s of interest
-        elif acc_list_action == 'filter_in':
-            r_df = r_df[idx].reset_index(drop=True)
-
-        # if after applying the accession list filter, there is no valid mapping left, exit the program
-        if len(r_df) == 0:
-            logging.info(f"No valid mappings after applying accession list filter. Exiting.")
-            sys.exit(0)
-
-    r_df['RSTART'] = r_df['RSTART'].astype(int)
-    r_df['REND'] = r_df['REND'].astype(int)
-    r_df['SLEN'] = r_df['REND']-r_df['RSTART']+1 # length of the signature fragment
-
-    # group by strain
-    str_df = r_df.groupby(['TAXID']).agg({
-        'COVBASES':'sum', # of covered signature bases
-        'NUMREADS':'sum', # of mapped reads
-        'MISMATCHES':'sum', # of mismatches
-        'INDELS':'sum', # of indels
-        'MAPPED_BASES':'sum', # total length of mapped bases (including matches and mismatches)
-        'CONSENSUS_DIFF':'sum', # number of positions with >50% mismatches among aligned reads
-        'INVALID_ALNS':'sum', # total invalid alignments (after filters) for this reference
-        'READLENGTH':'sum', # total length of reads
-        'SLEN':'sum', # length of this signature fragments (mapped)
-        'AOI_READ_COUNT':'sum'  # reportable read count
-    }).reset_index()
-    # total length of signatures
-    str_df['TOTAL_SIG_LEN'] = str_df['TAXID'].map(df_stats['TotalLength'])
-    str_df['BEST_SIG_COV'] = str_df['COVBASES']/str_df['TOTAL_SIG_LEN'] # bLC:  best linear coverage of a strain
-    str_df['DEPTH'] = str_df['MAPPED_BASES']/str_df['TOTAL_SIG_LEN'] # roll-up DoC
-    str_df['NOTE'] = str_df['TAXID'].map(df_stats['Note']).fillna('') # note for the strain
-    
-    # rename columns
-    str_df.rename(columns={
-        "MAPPED_BASES": "TOTAL_BP_MAPPED",
-        "NUMREADS":     "READ_COUNT",
-        "MISMATCHES":   "TOTAL_BP_MISMATCH",
-        "INDELS":       "TOTAL_BP_INDEL",
-        "READLENGTH":   "TOTAL_READ_LEN",
-        "COVBASES":     "COVERED_SIG_LEN",
-        "SLEN":         "MAPPED_SIG_LEN",
-    }, inplace=True)
-
-    # check if TOTAL_SIG_LEN is 0, report the TAXID and exit
-    # this should not happen if the database and corresponding stats file are correct
-    if str_df['TOTAL_SIG_LEN'].eq(0).any():
-        logging.fatal(f"Error: total signature length is ZERO for some mapped strains. Please check your database.")
-        sys.exit(1)
-
-    # get genome size
-    str_df['SIG_LEVEL'] = str_df['TAXID'].map(df_stats['DB_level'])
-    str_df['GENOME_SIZE'] = str_df['TAXID'].map(df_stats['GenomeSize'])
-    str_df['GENOME_COUNT'] = 1
-
-    # infer total genome contents
-    str_df['GENOMIC_CONTENT_EST'] = str_df['TOTAL_BP_MAPPED']/str_df['TOTAL_SIG_LEN']*str_df['GENOME_SIZE']
-
-    # estimate z-score
-    str_df['ZSCORE'] = str_df.apply(lambda x: pile_lvl_zscore(x.TOTAL_BP_MAPPED, x.TOTAL_SIG_LEN, x.COVERED_SIG_LEN), axis=1)
-
-    return str_df, aoi_read_count
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -529,7 +397,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = p.parse_args(argv)
 
-    ref_results = comp_cov_mismatches(
+    ref_results = parse_aln_from_bam(
         bam_path=args.bam,
         processes=args.processes,
         min_frac=args.min_frac,

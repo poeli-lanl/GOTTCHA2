@@ -2,7 +2,10 @@
 import argparse
 import gzip
 import sys
-from typing import Optional
+import pandas as pd
+import os
+import logging
+from types import SimpleNamespace
 
 def open_in(path: str):
     if path == "-":
@@ -134,6 +137,102 @@ def split_to_fasta(input_path: str,
                 chunk_count += write_chunks_fasta(hout, rid, seq, split_length, step_length, drop_tail, min_tail, prefix_b)
 
     return chunk_count
+
+
+def preprocess_nanopore_reads(reads, outdir, prefix, silent):
+    """
+    Split nanopore reads into shorter chunks before mapping.
+
+    Parameters:
+        reads (list): List of input read file objects (expects exactly one)
+        outdir (str): Output directory for temporary files
+        prefix (str): Prefix for the generated chunk file
+        silent (bool): Silence flag for logging
+
+    Returns:
+        list: Updated list of read objects pointing to the chunked read file
+    """
+    os.makedirs(outdir, exist_ok=True)
+
+    if len(reads) != 1:
+        logging.fatal("ERROR: Nanopore read processing expects a single input file.")
+        sys.exit(1)
+
+    input_path = reads[0].name
+    output_path = os.path.join(outdir, f"{prefix}.split_reads.fasta.gz")
+
+    try:
+        chunk_count = split_to_fasta(input_path, output_path, split_length=150, step_length=150, drop_tail=True)
+    except Exception as e:
+        logging.info(f"ERROR: Failed to split nanopore reads: {e}")
+        sys.exit(1)
+    else:
+        if chunk_count == 0:
+            logging.info("ERROR: No reads were produced after splitting nanopore reads.")
+            sys.exit(1)
+        logging.info(f" - {chunk_count} chunks written to {output_path}")
+
+    return [SimpleNamespace(name=output_path)]
+
+
+def split_reads_samfile_postprocessing(samfile, samfile_temp):
+    """
+    Clean up SAM file by removing inconsistent split-read alignments.
+
+    Parameters:
+        samfile (str): Path to the input SAM file
+        samfile_temp (str): Path to the output cleaned SAM file
+
+    Returns:
+        bool: True if successful
+    """
+    total_chunks = 0
+
+    logging.info(f'Reading split-read alignments from the sam file...')
+
+    df = pd.read_csv(samfile,
+                sep='\t',
+                header=None,
+                usecols=[0, 2],
+                names=['QNAME', 'REF'],
+                dtype={'QNAME': 'str', 'REF': 'str'}
+    )
+
+    df['QNAME_MAIN'] = df['QNAME'].str.split('|').str[0]
+    df['REF_TAXID'] = df['REF'].str.split('|').str[-2]
+
+    logging.info(f'Filtering out inconsistent chunks of reads...')
+    # get the index with the most frequent taxid for each read
+    idxmax = df.assign(_taxid_cnt=df.groupby(["QNAME_MAIN", "REF_TAXID"])["REF_TAXID"].transform("size")) \
+                .loc[lambda x: x["_taxid_cnt"] == x.groupby("QNAME_MAIN")["_taxid_cnt"].transform("max")] \
+                .index
+    # Create a set of indices for faster lookup
+    idxmax_set = set(idxmax.values)
+
+    # in the idxmax, get the index of the first occurrence of the chunk (QNAME_MAIN) for each read
+    idx1st = df.loc[idxmax].drop_duplicates(subset="QNAME_MAIN", keep="first").index
+    idx1st_set = set(idx1st.values)
+
+    total_chunks = len(df)
+    del idxmax
+    del df
+
+    logging.info(f'Writing qualified hits...')
+    with open(samfile_temp, 'w') as fout, open(samfile, 'r') as fin:
+        for idx, line in enumerate(fin):
+            if not idx%100000:
+                logging.debug(f'Processed {idx} lines...')
+
+            if idx in idxmax_set:
+                if idx in idx1st_set:
+                    fout.write(f"{line.rstrip()}\tZC:i:1\n")
+                else:
+                    fout.write(line)
+
+    logging.info(f'Done writing {len(idxmax_set)} hits.')
+
+    return True, total_chunks, len(idxmax_set)
+
 
 def main():
     ap = argparse.ArgumentParser(description="Split long reads into fixed-length chunks; output FASTA only (input FASTA/FASTQ, .gz ok).")

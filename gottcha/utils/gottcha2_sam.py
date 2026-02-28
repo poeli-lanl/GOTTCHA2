@@ -2,7 +2,7 @@
 
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", "Anna Chernikov", "Jason Gans", "Tracey Freites", "Patrick Chain"]
-__version__   = "2.2.2"
+__version__   = "2.2.3"
 
 import argparse as ap
 import sys, os, time, subprocess
@@ -19,11 +19,11 @@ from types import SimpleNamespace
 try:
     # Try relative import first (for package usage)
     from . import taxonomy
-    from . import split_reads
+    from . import ont_utils
 except ImportError:
     # Fall back to direct import (for script usage)
     import taxonomy as gt
-    import split_reads
+    import gottcha.utils.ont_utils as ont_utils
 
 def parse_args(ver, args):
     """
@@ -1463,7 +1463,7 @@ def preprocess_nanopore_reads(reads, outdir, prefix, silent):
 
     print_message("Splitting nanopore reads into chunks...", silent, begin_t, logfile)
     try:
-        chunk_count = split_reads.split_to_fasta(input_path, output_path, split_length=150, step_length=150, drop_tail=True)
+        chunk_count = ont_utils.split_to_fasta(input_path, output_path, split_length=150, step_length=150, drop_tail=True)
     except Exception as e:
         print_message(f"ERROR: Failed to split nanopore reads: {e}", silent, begin_t, logfile, errorout=1)
     else:
