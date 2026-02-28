@@ -14,18 +14,19 @@ try:
     # Try relative import first (for package usage)
     import taxonomy
     import report
-    import gottcha_sam_to_bam
-    import gottcha.utils.process_bam as process_bam
+    import sam_to_bam
+    import process_bam
     import ont_utils
     import read_mapping
     import aggregate_results
     import extract_reads
+    from gottcha2 import __version__
 except ImportError:
     # Fall back to direct import (for script usage)
     import gottcha.utils.report as report
     import gottcha.utils.taxonomy as taxonomy
     import gottcha.utils.ont_utils as ont_utils
-    import gottcha.utils.gottcha_sam_to_bam as gottcha_sam_to_bam
+    import gottcha.utils.sam_to_bam as sam_to_bam
     import gottcha.utils.process_bam as process_bam
     import gottcha.utils.aggregate_results as aggregate_results
     import gottcha.utils.read_mapping as read_mapping
@@ -495,8 +496,8 @@ def main(args):
 
     argvs = parse_args( __version__, args )
     begin_t  = time.time()
-    samfile  = argvs.sam if argvs.sam else f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
     bamfile  = argvs.bam if argvs.bam else f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.bam"
+    samfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
     logfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.log"
     set_start_method("fork") # for default multiprocessing method
     acc_list = set()
@@ -683,7 +684,7 @@ def main(args):
     if not argvs.extractOnly:
         if os.path.isfile(os.path.abspath(samfile)):
             print_message( "Converting to BAM file...", argvs.silent, begin_t, logfile )
-            gottcha_sam_to_bam.convert_sam_to_bam(input_sam=os.path.abspath(samfile),
+            sam_to_bam.convert_sam_to_bam(input_sam=os.path.abspath(samfile),
                                                   output_bam=os.path.abspath(bamfile),
                                                   threads=argvs.threads,
                                                   quiet=argvs.silent)

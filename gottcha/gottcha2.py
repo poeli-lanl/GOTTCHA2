@@ -10,13 +10,13 @@ try:
     from .utils import profile
     from .utils import gottcha2
     from .utils import download
-    from .utils import gottcha_sam_to_bam
+    from .utils import sam_to_bam
 except ImportError:
     # If the above relative imports fail, try absolute imports (for direct execution)
     from utils import profile
-    from gottcha.utils import gottcha2
+    from utils import gottcha2
     from utils import download
-    from utils import gottcha_sam_to_bam
+    from utils import sam_to_bam
 
 import sys
 
@@ -58,7 +58,7 @@ def cli():
     elif args[0] == "download":
         download.main(args[1:])
     elif args[0] == "sam2bam":
-        gottcha_sam_to_bam.main(args[1:])
+        sam_to_bam.main(args[1:])
     elif args[0] == "version":
         print(f"{__version__}")
     elif args[0] == "extract":
