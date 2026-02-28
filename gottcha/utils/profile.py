@@ -224,20 +224,16 @@ def parse_args(ver, args):
         for path in args_parsed.input:
             if path == '-':
                 p.error('--input does not support reading from stdin ("-"). Please provide a file path.')
-            if not os.path.isfile(path):
+            if not Path(path).is_file():
                 p.error(f'Input file {path} not found.')
-            validated_inputs.append(SimpleNamespace(name=os.path.abspath(path)))
-        args_parsed.input = validated_inputs
 
     if args_parsed.bam:
         bam_path = args_parsed.bam
-        if bam_path != '-' and not os.path.isfile(bam_path):
+        if bam_path != '-' and not Path(bam_path).is_file():
             p.error(f'BAM file {bam_path} not found.')
-        bam_path_name = bam_path if bam_path == '-' else os.path.abspath(bam_path)
-        args_parsed.bam = [SimpleNamespace(name=bam_path_name)]
 
     if args_parsed.accList:
-        if not os.path.isfile(args_parsed.accList):
+        if not Path(args_parsed.accList).is_file():
             p.error(f'Accession exclusion list {args_parsed.accList} not found.')
         args_parsed.accList = os.path.abspath(args_parsed.accList)
 
@@ -246,10 +242,10 @@ def parse_args(ver, args):
 
     if not args_parsed.prefix:
         if args_parsed.input:
-            name = search(r'([^\/\.]+)\..*$', args_parsed.input[0].name)
+            name = search(r'([^\/\.]+)\..*$', args_parsed.input[0])
             args_parsed.prefix = name.group(1)
         elif args_parsed.bam:
-            name = search(r'([^\/]+)\.\w+\.bam$', args_parsed.bam[0].name)
+            name = search(r'([^\/]+)\.\w+\.bam$', args_parsed.bam)
             args_parsed.prefix = name.group(1)
         else:
             args_parsed.prefix = "GOTTCHA_"
@@ -263,7 +259,7 @@ def parse_args(ver, args):
                     args_parsed.dbLevel = part
                     break
         elif args_parsed.bam:
-            name = search(r'\.gottcha_(\w+).bam$', args_parsed.bam[0].name)
+            name = search(r'\.gottcha_(\w+).bam$', args_parsed.bam[0])
             try:
                 args_parsed.dbLevel = name.group(1)
             except:
@@ -496,7 +492,7 @@ def main(args):
 
     argvs = parse_args( __version__, args)
     begin_t  = time.time()
-    bamfile  = argvs.bam[0].name if argvs.bam[0].name else f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.bam"
+    bamfile  = argvs.bam if argvs.bam else f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.bam"
     samfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
     logfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.log"
     set_start_method("fork") # for default multiprocessing method
