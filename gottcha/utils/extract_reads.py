@@ -24,10 +24,10 @@ def parse_taxids(taxid_arg: str, res_df: pd.DataFrame, full_tsv_fn: str) -> Tupl
 
     if res_df.shape[1] > 0:
         taxa_df = res_df
-        logging.info(f"Successfully loaded taxonomy profile with {len(taxa_df)} entries")
+        logging.info(f"Successfully loaded result summary with {len(taxa_df)} taxonomic entries")
     else:
         try:
-            logging.info(f"Reading taxonomy file {full_tsv_fn}...")
+            logging.info(f"Reading result summary file {full_tsv_fn}...")
             taxa_df = pd.read_csv(full_tsv_fn,
                                 sep='\t',
                                 engine='python',
@@ -35,9 +35,9 @@ def parse_taxids(taxid_arg: str, res_df: pd.DataFrame, full_tsv_fn: str) -> Tupl
                                 on_bad_lines='skip',
                                 dtype={'NOTE': str})
 
-            logging.info(f"Successfully loaded taxonomy profile with {len(taxa_df)} entries")
+            logging.info(f"Successfully loaded result summary with {len(taxa_df)} entries")
         except Exception as e:
-            logging.error(f"Error reading taxonomy file: {e}")
+            logging.error(f"Error reading result summary file: {e}")
             sys.exit(1)
 
     # Filter in entries specified by taxid_arg

@@ -799,7 +799,7 @@ def main(args):
             max_per_taxon = int(max_per_taxon) if max_per_taxon != 'all' else 0
 
         if argvs.extractOnly:
-            full_report_file = '.'.join(os.path.abspath(samfile).split('.')[:-2]) + ".full.tsv"
+            full_report_file = bamfile.replace(".bam", ".full.tsv")
 
         taxa_dict, qualified_taxids = extract_reads.parse_taxids(taxa_arg, res_df, full_report_file)
 
