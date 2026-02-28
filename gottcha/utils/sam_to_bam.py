@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import pandas as pd
-
+import numpy as np
 import pysam
 import argparse
 import sys
@@ -34,7 +34,7 @@ def convert_sam_to_bam(input_sam: str, output_bam: str, threads=4, quiet=False) 
 
         # Extract unique references from both REF and MATE_REF columns, excluding '*' and '='
         refs = pd.concat([df['REF'], df['MATE_REF']]).unique()
-        refs = refs[~refs.isin(['=', '*'])]
+        refs = refs[~np.isin(refs, ['=', '*'])]
 
         logging.debug(f"Unique references extracted: {len(refs)}")
 
@@ -44,7 +44,7 @@ def convert_sam_to_bam(input_sam: str, output_bam: str, threads=4, quiet=False) 
         def convert_to_header(row):
             ref = row['REF']
             start, end = ref.split('|')[1:3]
-            return f"@SQ\tSN:{ref}\tLN:{int(end)-int(start)+1}"
+            return f"@SQ\tSN:{ref}\tLN:{int(end)-int(start)+1}\n"
         
         with open(header_file, 'w') as out:
             out.write("@HD\tVN:1.0\tSO:coordinate\n")
