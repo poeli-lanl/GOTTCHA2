@@ -158,7 +158,7 @@ def preprocess_nanopore_reads(reads, outdir, prefix, silent):
         logging.fatal("ERROR: Nanopore read processing expects a single input file.")
         sys.exit(1)
 
-    input_path = reads[0].name
+    input_path = reads
     output_path = os.path.join(outdir, f"{prefix}.split_reads.fasta.gz")
 
     try:
