@@ -30,7 +30,7 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
             errs (str): Error output from the command
         )
     """
-    input_file = " ".join([x for x in reads])
+    input_file = " ".join(reads)
 
     # Minimap2 options for short reads: the options here is essentailly the -x 'sr' equivalent with some modifications on scoring
     sr_opts = f"-x sr {mm_options} -a -N20 --eqx --secondary=no --sam-hit-only"

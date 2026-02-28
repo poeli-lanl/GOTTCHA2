@@ -6,9 +6,8 @@ import pandas as pd
 from pathlib import Path
 import gc
 from re import search
-from multiprocessing import Pool, set_start_method
+from multiprocessing import set_start_method
 import logging
-from types import SimpleNamespace
 
 try:
     # Try relative import first (for package usage)
@@ -293,7 +292,11 @@ def parse_args(ver, args):
         if not args_parsed.extract:
             error_message += "--extract must be specified\n"
 
-        p.error( error_message)
+        if not args_parsed.bam:
+            error_message += "--bam must be specified\n"
+
+        if error_message:
+            p.error( error_message)
 
     if args_parsed.noCutoff:
         args_parsed.sniScore = '0,0,0'
@@ -562,7 +565,7 @@ def main(args):
     print_message( f"    Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile)
     print_message( f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile)
     if argvs.input:
-        print_message( f"    Input Reads        : {[x for x in argvs.input]}",     argvs.silent, begin_t, logfile)
+        print_message( f"    Input Reads        : {argvs.input}",     argvs.silent, begin_t, logfile)
     if argvs.bam:
         print_message( f"    Input BAM File     : {bamfile}",           argvs.silent, begin_t, logfile)
     if argvs.nanopore:

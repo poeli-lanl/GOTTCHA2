@@ -62,7 +62,8 @@ def cli():
     elif args[0] == "version":
         print(f"{__version__}")
     elif args[0] == "extract":
-        profile.main(args + ["--extractOnly"])
+        args.append("-eo")  # Add --extract-only flag for extract command
+        profile.main(args)
 
     else:
         print(f"Error: '{args[0]}' is not a valid command")

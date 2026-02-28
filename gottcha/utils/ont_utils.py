@@ -158,21 +158,21 @@ def preprocess_nanopore_reads(reads, outdir, prefix, silent):
         logging.fatal("ERROR: Nanopore read processing expects a single input file.")
         sys.exit(1)
 
-    input_path = reads
+    input_path = reads[0]
     output_path = os.path.join(outdir, f"{prefix}.split_reads.fasta.gz")
 
     try:
         chunk_count = split_to_fasta(input_path, output_path, split_length=150, step_length=150, drop_tail=True)
     except Exception as e:
-        logging.info(f"ERROR: Failed to split nanopore reads: {e}")
+        logging.fatal(f"ERROR: Failed to split nanopore reads: {e}")
         sys.exit(1)
     else:
         if chunk_count == 0:
-            logging.info("ERROR: No reads were produced after splitting nanopore reads.")
+            logging.fatal("ERROR: No reads were produced after splitting nanopore reads.")
             sys.exit(1)
         logging.info(f" - {chunk_count} chunks written to {output_path}")
 
-    return [SimpleNamespace(name=output_path)]
+    return [output_path]
 
 
 def split_reads_samfile_postprocessing(samfile, samfile_temp):
