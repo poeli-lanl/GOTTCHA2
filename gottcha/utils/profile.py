@@ -131,8 +131,8 @@ def parse_args(ver, args):
     p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float,
                     help="Minimum identity (0.0-1.0) required for a valid match. [default: 0.95 for short reads, 0.9 for nanopore reads]")
 
-    p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0.99,
-                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0.99]")
+    p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0.95,
+                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0.95]")
 
     p.add_argument( '-mg','--matchLength', metavar='<INT>', type=int, default=100,
                     help="Minimum length of the alignment required to be considered a valid match. [default: 100]")
@@ -528,7 +528,6 @@ def main(args):
 
     dependency_check("minimap2")
     dependency_check("samtools")
-    # dependency_check("gawk")
 
     #prepare output object
     argvs.relAbu = argvs.relAbu.upper()

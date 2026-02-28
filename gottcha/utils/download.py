@@ -18,6 +18,7 @@ def calculate_md5(file_path, chunk_size=8192):
             md5.update(chunk)
     return md5.hexdigest()
 
+
 def parse_params(args):
     parser = argparse.ArgumentParser(prog='download.py', description="""This script will pull the latest version of the Gottcha2 database.""")
 
@@ -26,6 +27,7 @@ def parse_params(args):
     parser.add_argument('-r', '--rank', default='species',
                     help='taxonomic rank of the database (superkingdom, phylum, class, order, famiily, genus, species)')
     return parser.parse_args(args)
+
 
 def download_db(argvs):
     if os.path.isdir('database'):
@@ -86,6 +88,7 @@ def download_db(argvs):
 def main(args):
     argvs = parse_params(args)
     download_db(argvs)
+
 
 if __name__ == '__main__':
     main(sys.argv[1:])
