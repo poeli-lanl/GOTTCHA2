@@ -19,7 +19,7 @@ GOTTCHAv2 is currently under development in BETA stage. Pre-built databases for 
 
 GOTTCHA2 profiler is written in Python 3 and uses minimap2 to map reads to signature sequences. To run GOTTCHA2, install the following dependencies. A ready-to-use Conda environment file is provided at `environment.yml`.
 
-- Python 3.8+
+- Python 3.9+
 - minimap2 2.17+
 - samtools
 - numpy

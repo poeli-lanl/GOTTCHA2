@@ -520,8 +520,8 @@ def main(args):
    )
 
     #dependency check
-    if sys.version_info < (3,8):
-        sys.exit("[ERROR] Python 3.8 or above is required.")
+    if sys.version_info < (3,9):
+        sys.exit("[ERROR] Python 3.9 or above is required.")
 
     dependency_check("minimap2")
     dependency_check("samtools")
