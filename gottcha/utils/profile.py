@@ -50,7 +50,8 @@ def parse_args(ver, args):
     Raises:
         SystemExit: If validation fails or --version is specified
     """
-    p = ap.ArgumentParser( prog='gottcha2.py', description="""Genomic Origin Through Taxonomic CHAllenge (GOTTCHA) is an
+    command = args.pop(0) if args else None
+    p = ap.ArgumentParser( prog=f'gottcha2 {command}', description="""Genomic Origin Through Taxonomic CHAllenge (GOTTCHA) is an
             annotation-independent and signature-based metagenomic taxonomic profiling tool
             that has significantly smaller FDR than other profiling tools. This program
             is a wrapper to map input reads to pre-computed signature databases using minimap2
@@ -60,9 +61,6 @@ def parse_args(ver, args):
 
     eg.add_argument( '-i','--input', metavar='[FASTQ]', nargs='+', type=str,
                     help="Input FASTQ/FASTA file(s). Use space to separate multiple input files.")
-
-    eg.add_argument( '-s','--sam', metavar='[SAMFILE]', type=str,
-                    help="Specify the input SAM file.")
 
     eg.add_argument( '-b','--bam', metavar='[BAMFILE]', type=str,
                     help="Specify the input BAM file (indexed).")
@@ -95,13 +93,13 @@ def parse_args(ver, args):
 
     p.add_argument('-ef', '--extractFullRef', action='store_true',
                     help=(
-                        "Extract up to 20 sequences per reference from the SAM file and save them to a FASTA file. "
+                        "Extract up to 20 sequences per reference from the alignment file and save them to a FASTA file. "
                         "Equivalent to using: -e 'all:20:fasta'."
                     )
     )
 
     p.add_argument('-eo', '--extractOnly', action='store_true',
-                    help='While --extract is specified, this option will only extract the reads and not perform any further processing of the SAM file.'
+                    help='While --extract is specified, this option will only extract the reads and not perform any further processing of the alignment file.'
     )
 
     p.add_argument( '-fm','--format', metavar='[STR]', type=str, default='tsv',
@@ -166,7 +164,7 @@ def parse_args(ver, args):
                           "[default: report_only]"))
 
     p.add_argument( '-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
-                    help="The multiple hit removal step is automatically enabled for sequence input files and disabled for SAM files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
+                    help="The multiple hit removal step is automatically enabled for sequence input files and disabled for alignment files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
 
     p.add_argument( '-er','--errorRate', metavar='<FLOAT>', type=float,
                     help="Estimated error rate for sequencing data. [default: 0.005]")
@@ -204,8 +202,8 @@ def parse_args(ver, args):
     if not args_parsed.database:
         p.error( '--database option is missing.' )
 
-    if args_parsed.input and args_parsed.sam:
-        p.error( '--input and --sam are incompatible options.' )
+    if args_parsed.input and args_parsed.bam:
+        p.error( '--input / --bam are incompatible options.' )
 
     if args_parsed.database:
         #assign default path for database name
@@ -230,12 +228,12 @@ def parse_args(ver, args):
             validated_inputs.append(SimpleNamespace(name=os.path.abspath(path)))
         args_parsed.input = validated_inputs
 
-    if args_parsed.sam:
-        sam_path = args_parsed.sam[0]
-        if sam_path != '-' and not os.path.isfile(sam_path):
-            p.error(f'SAM file {sam_path} not found.')
-        sam_path_name = sam_path if sam_path == '-' else os.path.abspath(sam_path)
-        args_parsed.sam = [SimpleNamespace(name=sam_path_name)]
+    if args_parsed.bam:
+        bam_path = args_parsed.bam[0]
+        if bam_path != '-' and not os.path.isfile(bam_path):
+            p.error(f'BAM file {bam_path} not found.')
+        bam_path_name = bam_path if bam_path == '-' else os.path.abspath(bam_path)
+        args_parsed.bam = [SimpleNamespace(name=bam_path_name)]
 
     if args_parsed.accList:
         if not os.path.isfile(args_parsed.accList):
@@ -248,9 +246,6 @@ def parse_args(ver, args):
     if not args_parsed.prefix:
         if args_parsed.input:
             name = search(r'([^\/\.]+)\..*$', args_parsed.input[0].name )
-            args_parsed.prefix = name.group(1)
-        elif args_parsed.sam:
-            name = search(r'([^\/]+).\w+.\w+$', args_parsed.sam )
             args_parsed.prefix = name.group(1)
         elif args_parsed.bam:
             name = search(r'([^\/]+).\w+.\w+$', args_parsed.bam )
@@ -266,12 +261,6 @@ def parse_args(ver, args):
                 if part in major_ranks:
                     args_parsed.dbLevel = part
                     break
-        elif args_parsed.sam:
-            name = search(r'\.gottcha_(\w+).sam$', args_parsed.sam[0].name )
-            try:
-                args_parsed.dbLevel = name.group(1)
-            except:
-                pass
         elif args_parsed.bam:
             name = search(r'\.gottcha_(\w+).bam$', args_parsed.bam[0].name )
             try:
@@ -301,6 +290,13 @@ def parse_args(ver, args):
 
     if args_parsed.extractFullRef:
         args_parsed.extract = 'all:20:fasta'
+
+    if args_parsed.extractOnly:
+        error_message = ""
+        if not args_parsed.extract:
+            error_message += "--extract must be specified\n"
+
+        p.error( error_message )
 
     if args_parsed.noCutoff:
         args_parsed.sniScore = '0,0,0'
@@ -570,8 +566,6 @@ def main(args):
     print_message( f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile )
     if argvs.input:
         print_message( f"    Input Reads        : {[x.name for x in argvs.input]}",     argvs.silent, begin_t, logfile )
-    if argvs.sam:
-        print_message( f"    Input SAM File     : {samfile}",           argvs.silent, begin_t, logfile )
     if argvs.bam:
         print_message( f"    Input BAM File     : {bamfile}",           argvs.silent, begin_t, logfile )
     if argvs.nanopore:
@@ -642,7 +636,6 @@ def main(args):
 
         print_message( "Running read-mapping...", argvs.silent, begin_t, logfile )
         exitcode, cmd, msg = read_mapping.minimap2( argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
-        gc.collect()
         print_message( f"Logfile saved to {logfile}.", argvs.silent, begin_t, logfile )
         logging.info( f"COMMAND: {cmd}" )
 
@@ -652,6 +645,7 @@ def main(args):
         else:
             print_message( f"Done mapping reads to {argvs.dbLevel} signature database.", argvs.silent, begin_t, logfile )
             print_message( f"Mapped SAM file saved to {samfile}.", argvs.silent, begin_t, logfile )
+        gc.collect()
 
     # remove multiple hits
     if argvs.removeMultipleHits == 'yes':
@@ -698,6 +692,7 @@ def main(args):
             file_path = Path(samfile)
             if file_path.exists():
                 file_path.unlink()
+            gc.collect()
 
         if Path(bamfile).exists() and Path(f"{bamfile}.bai").exists():
             print_message( "Processing alignments...", argvs.silent, begin_t, logfile )
@@ -715,8 +710,6 @@ def main(args):
 
             print_message( f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile )
             print_message( f" - {tol_alignment_count} qualified alignments processed", argvs.silent, begin_t, logfile )
-
-            gc.collect()
 
             if not tol_alignment_count:
                 print_message( "No qualified alignments found. Stopping.", argvs.silent, begin_t, logfile )

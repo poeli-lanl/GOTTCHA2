@@ -63,6 +63,7 @@ setup(
         "pysam>=0.22.0",
         "tqdm",
     ],
+    scripts=['gottcha/utils/gottcha2.py', 'gottcha/utils/ont_utils.py', 'gottcha/utils/taxonomy.py'],
     packages=find_packages(include=["gottcha*"], exclude=["test*", "tests*", "docs*"]),
     include_package_data=True,
     zip_safe=False,

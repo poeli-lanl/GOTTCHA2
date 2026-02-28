@@ -34,6 +34,7 @@ Output columns (TSV):
 from __future__ import annotations
 
 import argparse
+import gc
 import multiprocessing as mp
 import os
 import sys
@@ -130,8 +131,6 @@ def _process_chunk(task: Tuple[str, int, int]) -> Tuple[str, int, int, int, int,
             continue
         if aln.mapping_quality < min_mapq:
             continue
-
-        
 
         if aln.reference_start >= start0:
             aln_starts_in_chunk_flag = True
@@ -239,6 +238,8 @@ def _process_chunk(task: Tuple[str, int, int]) -> Tuple[str, int, int, int, int,
     # Positions where mismatch fraction > 0.5 among reads with aligned bases
     # i.e. mm / depth > 0.5  ->  2*mm > depth
     consensus_diff = int(np.count_nonzero((depth > 0) & (mm * 2 > depth)))
+
+    gc.collect()
 
     return [rname,
             start0,

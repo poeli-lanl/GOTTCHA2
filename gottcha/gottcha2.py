@@ -8,13 +8,13 @@ __credits__   = ["Po-E Li",
                  "Patrick Chain"]
 try:
     from .utils import profile
-    from .utils import gottcha2_sam
+    from .utils import gottcha2
     from .utils import download
     from .utils import gottcha_sam_to_bam
 except ImportError:
     # If the above relative imports fail, try absolute imports (for direct execution)
     from utils import profile
-    from utils import gottcha2_sam
+    from gottcha.utils import gottcha2
     from utils import download
     from utils import gottcha_sam_to_bam
 
@@ -53,10 +53,8 @@ def cli():
     args = sys.argv[1:]
     if len(args) < 1:
         usage()
-    elif args[0] == "profile_sam":
-        gottcha2_sam.main(args[1:])
     elif args[0] == "profile":
-        profile.main(args[1:])
+        profile.main(args)
     elif args[0] == "download":
         download.main(args[1:])
     elif args[0] == "sam2bam":
@@ -64,7 +62,7 @@ def cli():
     elif args[0] == "version":
         print(f"{__version__}")
     elif args[0] == "extract":
-        profile.main(args[1:])
+        profile.main(args)
 
     else:
         print(f"Error: '{args[0]}' is not a valid command")
