@@ -284,8 +284,8 @@ def parse_args(ver, args):
 
     if args_parsed.matchIdentity is None:
          if args_parsed.nanopore:
-            args_parsed.matchIdentity = 0.85
-            args_parsed.matchFraction = 0
+            args_parsed.matchIdentity = 0.9
+            args_parsed.matchFraction = 0.9
          else:
             args_parsed.matchIdentity = 0.95
 
@@ -1947,7 +1947,7 @@ def main(args):
         print_message(f"ERROR: {argvs.database+'.stats'} not found.", argvs.silent, begin_t, logfile, errorout=1)
 
     print_message(f" - {df_stats.shape[0]} entries loaded.", argvs.silent, begin_t, logfile)
-    print_message(f" - signatures at {df_stats['DB_level'].unique()} levels loaded.", argvs.silent, begin_t, logfile)
+    print_message(f" - signatures at {df_stats['DB_level'].unique().tolist()} levels loaded.", argvs.silent, begin_t, logfile)
 
     if argvs.accList:
         print_message("Loading accession#s of interest list...", argvs.silent, begin_t, logfile)
