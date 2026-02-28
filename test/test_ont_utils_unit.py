@@ -65,13 +65,13 @@ class TestOntUtils(unittest.TestCase):
                 f.write(b">r1\n" + b"A" * 300 + b"\n")
 
             out_reads = ont_utils.preprocess_nanopore_reads(
-                reads=[SimpleNamespace(name=inp)],
+                reads=[inp],
                 outdir=tmp,
                 prefix="sample1",
                 silent=True,
             )
             self.assertEqual(len(out_reads), 1)
-            out_path = out_reads[0].name
+            out_path = out_reads[0]
             self.assertTrue(out_path.endswith(".split_reads.fasta.gz"))
             self.assertTrue(os.path.exists(out_path))
 

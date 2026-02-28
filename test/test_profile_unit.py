@@ -19,14 +19,14 @@ class TestProfileUtils(unittest.TestCase):
             open(db_prefix + ".mmi", "w").close()
             open(read_path, "w").close()
 
-            args = profile.parse_args("test", ["-i", read_path, "-d", db_prefix])
+            args = profile.parse_args("test", ["profile", "-i", read_path, "-d", db_prefix])
 
             self.assertEqual(args.dbLevel, "species")
             self.assertEqual(args.matchIdentity, 0.95)
             self.assertEqual(args.removeMultipleHits, "yes")
             self.assertEqual(args.errorRate, 0.005)
             self.assertEqual(args.prefix, "reads")
-            self.assertEqual(args.input[0].name, os.path.abspath(read_path))
+            self.assertEqual(args.input[0], os.path.abspath(read_path))
 
     def test_parse_args_nanopore_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -35,7 +35,7 @@ class TestProfileUtils(unittest.TestCase):
             open(db_prefix + ".mmi", "w").close()
             open(read_path, "w").close()
 
-            args = profile.parse_args("test", ["-i", read_path, "-d", db_prefix, "-np"])
+            args = profile.parse_args("test", ["profile", "-i", read_path, "-d", db_prefix, "-np"])
 
             self.assertEqual(args.matchIdentity, 0.85)
             self.assertEqual(args.matchFraction, 0)
@@ -50,7 +50,7 @@ class TestProfileUtils(unittest.TestCase):
 
             args = profile.parse_args(
                 "test",
-                ["-i", read_path, "-d", db_prefix, "-ef", "-nc"],
+                ["profile", "-i", read_path, "-d", db_prefix, "-ef", "-nc"],
             )
             self.assertEqual(args.extract, "all:20:fasta")
             self.assertEqual(args.sniScore, "0,0,0")

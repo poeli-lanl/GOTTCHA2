@@ -16,7 +16,7 @@ class TestGottcha2Cli(unittest.TestCase):
         with mock.patch.object(gottcha2.profile, "main") as profile_main:
             with mock.patch.object(sys, "argv", ["gottcha2", "profile", "-i", "reads.fq"]):
                 gottcha2.cli()
-        profile_main.assert_called_once_with(["-i", "reads.fq"])
+        profile_main.assert_called_once_with(["profile", "-i", "reads.fq"])
 
     def test_cli_prints_version(self):
         buf = io.StringIO()
