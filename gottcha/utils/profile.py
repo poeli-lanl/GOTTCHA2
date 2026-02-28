@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse as ap
+import re
 import sys, os, time, subprocess
 import pandas as pd
 from pathlib import Path
@@ -791,7 +792,8 @@ def main(args):
             max_per_taxon = int(max_per_taxon) if max_per_taxon != 'all' else 0
 
         if argvs.extractOnly:
-            full_report_file = bamfile.replace(".bam", ".full.tsv")
+            # repalce bamfile name to replace from ".gottcha_\w+.bam" to ".full.tsv"
+            full_report_file = re.sub(r"\.gottcha_\w+\.bam$", ".full.tsv", bamfile)
 
         taxa_dict, qualified_taxids = extract_reads.parse_taxids(taxa_arg, res_df, full_report_file)
 
