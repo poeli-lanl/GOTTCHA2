@@ -131,7 +131,7 @@ def parse_args(ver, args):
     p.add_argument('-mg','--matchLength', metavar='<INT>', type=int,
                     help="Minimum length (bp) of the alignment required to be considered a valid match. [default: 100]")
 
-    p.add_argument('-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str, default='0.9,0.95,0.99',
+    p.add_argument('-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str,
                     help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
 
     p.add_argument('-Mc','-mc','--minCov', metavar='<FLOAT>', type=float, default=0,
@@ -195,11 +195,14 @@ def parse_args(ver, args):
     if args_parsed.extract and args_parsed.extractFullRef:
         p.error('--extract and --extractFullRef are incompatible options.')
 
-    if not args_parsed.database:
-        p.error('--database option is missing.')
-
     if args_parsed.input and args_parsed.bam:
         p.error('--input / --bam are incompatible options.')
+
+    if not args_parsed.extractOnly:
+        if not args_parsed.database:
+            p.error('--database option is missing.')
+        if args_parsed.sniScore is None:
+            args_parsed.sniScore='0.9,0.95,0.99'
 
     if args_parsed.database:
         #assign default path for database name
@@ -254,7 +257,7 @@ def parse_args(ver, args):
                     args_parsed.dbLevel = part
                     break
         elif args_parsed.bam:
-            name = search(r'\.gottcha_(\w+).bam$', args_parsed.bam[0])
+            name = search(r'\.gottcha_(\w+).bam$', args_parsed.bam)
             try:
                 args_parsed.dbLevel = name.group(1)
             except:
@@ -268,6 +271,14 @@ def parse_args(ver, args):
             args_parsed.removeMultipleHits = "yes"
         else:
             args_parsed.removeMultipleHits = "no"
+
+
+    # Set SNI-SCORE default to 0.9, species 0.95, strain 0.99
+    if args_parsed.sniScore:
+        if args_parsed.sniScore.count(',') == 0:
+            args_parsed.sniScore = ','.join([args_parsed.sniScore]*3)
+        elif args_parsed.sniScore.count(',') == 1:
+            args_parsed.sniScore = args_parsed.sniScore + ',0.99'
 
     # If mi/mf/mg are not specified, set them to default values based on whether --nanopore is specified
     # But if --extractOnly is specified, do not set default values for matchIdentity and matchFraction, the value will be load from the log file if not provided
@@ -570,13 +581,16 @@ def main(args):
     if argvs.extractOnly:
         # repalce bamfile name to replace from ".gottcha_\w+.bam" to ".full.tsv"
         logfile_exist = bamfile.replace(".bam", ".log")
+        (mi, mf, mg, sni_argv) = (None, None, None, None)
 
         # if match criteria (mi/mf/mg) are not provided, load them from the log file
-        if Path(logfile_exist).is_file() and \
-                    (argvs.matchIdentity is None) and \
-                        (argvs.matchFraction is None) and \
-                            (argvs.matchLength is None):
-            (mi, mf, mg) = extract_reads.load_match_criteria_from_log(logfile_exist)
+        if Path(logfile_exist).is_file():
+            (mi, mf, mg, sni_argv) = extract_reads.load_criteria_from_log(logfile_exist)
+
+        if argvs.sniScore is None:
+            argvs.sniScore = sni_argv
+
+        if (argvs.matchIdentity is None) and (argvs.matchFraction is None) and (argvs.matchLength is None):
             argvs.matchIdentity = mi
             argvs.matchFraction = mf
             argvs.matchLength = mg
@@ -589,6 +603,8 @@ def main(args):
             if argvs.matchLength is None:
                 argvs.matchLength = 0
 
+    (sni_score_cutoff, sni_score_species, sni_score_strain) = [float(x) for x in argvs.sniScore.split(',')]
+
     # display the command line
     logging.info(' '.join(sys.argv))
 
@@ -600,7 +616,6 @@ def main(args):
     print_message(f"    Output directory   : {argvs.outdir}",      argvs.silent, begin_t, logfile)
     print_message(f"    Output prefix      : {argvs.prefix}",      argvs.silent, begin_t, logfile)
     print_message(f"    Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile)
-    print_message(f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile)
     if argvs.input:
         print_message(f"    Input Reads        : {argvs.input}",     argvs.silent, begin_t, logfile)
     if argvs.bam:
@@ -623,44 +638,47 @@ def main(args):
         print_message(f"    Extract Taxa       : {argvs.extract}",     argvs.silent, begin_t, logfile)
     if argvs.extractOnly:
         print_message(f"    Extract Only       : {argvs.extractOnly}", argvs.silent, begin_t, logfile)
+    if argvs.maxZscore > 0:
+        print_message(f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile)
     if logfile_exist:
-        print_message(f"    Match criteria from: {logfile_exist}",      argvs.silent, begin_t, logfile)
+        print_message(f"    Load criteria from : {logfile_exist}",      argvs.silent, begin_t, logfile)
     if argvs.matchIdentity != None:
         print_message(f"    Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile)
     if argvs.matchFraction != None:
         print_message(f"    Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile)
     if argvs.matchLength != None:
         print_message(f"    Min Match Length   : {argvs.matchLength}", argvs.silent, begin_t, logfile)
-    if argvs.maxZscore > 0:
-        print_message(f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile)
+    if argvs.sniScore != None:
+        print_message(f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile)
 
-    #load taxonomy
-    print_message("Loading taxonomy information...", argvs.silent, begin_t, logfile)
-    custom_taxa_tsv = None
-    dbpath = None
-    if os.path.isdir(argvs.taxInfo):
-        dbpath = argvs.taxInfo
-    elif os.path.isfile(argvs.taxInfo):
-        custom_taxa_tsv = argvs.taxInfo
-    elif os.path.isfile(argvs.database + ".tax.tsv"):
-        custom_taxa_tsv = argvs.database + ".tax.tsv"
+    #load taxonomy for taxonomic aggregation and annotation
+    if not argvs.extractOnly:
+        print_message("Loading taxonomy information...", argvs.silent, begin_t, logfile)
+        custom_taxa_tsv = None
+        dbpath = None
+        if os.path.isdir(argvs.taxInfo):
+            dbpath = argvs.taxInfo
+        elif os.path.isfile(argvs.taxInfo):
+            custom_taxa_tsv = argvs.taxInfo
+        elif os.path.isfile(argvs.database + ".tax.tsv"):
+            custom_taxa_tsv = argvs.database + ".tax.tsv"
 
-    logging.info(f"Taxonomy file: {custom_taxa_tsv}")
+        logging.info(f"Taxonomy file: {custom_taxa_tsv}")
 
-    taxonomy.loadTaxonomy(dbpath=dbpath,
-                    cus_taxonomy_file=custom_taxa_tsv,
-                    auto_download=False)
-    print_message(f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile)
+        taxonomy.loadTaxonomy(dbpath=dbpath,
+                        cus_taxonomy_file=custom_taxa_tsv,
+                        auto_download=False)
+        print_message(f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile)
 
-    #load database stats
-    print_message("Loading database stats...", argvs.silent, begin_t, logfile)
-    if os.path.isfile(argvs.database + ".stats"):
-        df_stats = load_database_stats(argvs.database+".stats")
-    else:
-        print_message(f"ERROR: {argvs.database+'.stats'} not found.", argvs.silent, begin_t, logfile, errorout=1)
+        #load database stats
+        print_message("Loading database stats...", argvs.silent, begin_t, logfile)
+        if os.path.isfile(argvs.database + ".stats"):
+            df_stats = load_database_stats(argvs.database+".stats")
+        else:
+            print_message(f"ERROR: {argvs.database+'.stats'} not found.", argvs.silent, begin_t, logfile, errorout=1)
 
-    print_message(f" - {df_stats.shape[0]} entries loaded.", argvs.silent, begin_t, logfile)
-    print_message(f" - signatures at {df_stats['DB_level'].unique().tolist()} levels loaded.", argvs.silent, begin_t, logfile)
+        print_message(f" - {df_stats.shape[0]} entries loaded.", argvs.silent, begin_t, logfile)
+        print_message(f" - signatures at {df_stats['DB_level'].unique().tolist()} levels loaded.", argvs.silent, begin_t, logfile)
 
     if argvs.accList:
         print_message("Loading accession#s of interest list...", argvs.silent, begin_t, logfile)
@@ -756,14 +774,6 @@ def main(args):
                 print_message("No qualified alignments found. Stopping.", argvs.silent, begin_t, logfile)
                 sys.exit(0)
 
-            # Set SNI-SCORE default to 0.8, species 0.95, strain 0.99
-            if ',' not in argvs.sniScore:
-                argvs.sniScore = ','.join([argvs.sniScore]*3)
-            elif argvs.sniScore.count(',') == 1:
-                argvs.sniScore = argvs.sniScore + ',0.99'
-
-            (sni_score_cutoff, sni_score_species, sni_score_strain) = [float(x) for x in argvs.sniScore.split(',')]
-
             # aggregate the results
             _args = (str_df,
                      argvs.relAbu,
@@ -835,9 +845,15 @@ def main(args):
             # repalce bamfile name to replace from ".gottcha_\w+.bam" to ".full.tsv"
             full_report_file = re.sub(r"\.gottcha_\w+\.bam$", ".full.tsv", bamfile)
 
-        taxa_dict, qualified_taxids = extract_reads.parse_taxids(taxa_arg, res_df, full_report_file)
+        taxa_dict, ref_to_extract_taxid = extract_reads.parse_taxids(taxa_arg, 
+                                                                     res_df, 
+                                                                     full_report_file, 
+                                                                     sni_score_cutoff,
+                                                                     sni_score_species, 
+                                                                     sni_score_strain
+                                                                     )
 
-        if not len(qualified_taxids):
+        if not len(ref_to_extract_taxid):
             print_message("No qualified taxonomy profiled.", argvs.silent, begin_t, logfile)
 
         if not argvs.stdout:
@@ -846,7 +862,7 @@ def main(args):
 
             _args = (os.path.abspath(bamfile),
                        taxa_dict,
-                       qualified_taxids,
+                       ref_to_extract_taxid,
                        out_fp,
                        argvs.threads,
                        argvs.matchFraction,

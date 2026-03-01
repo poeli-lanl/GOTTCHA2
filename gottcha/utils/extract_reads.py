@@ -7,15 +7,15 @@ import sys
 import logging
 import pandas as pd
 from typing import Iterable, List, Optional, Tuple
-
+from collections import defaultdict
 import pysam
-from . import taxonomy
 
 # Global BAM handle and config for worker processes
 taxa_dict = {}
 lineage_cache = {}  # Cache for reference taxid to qualified taxids mapping
+ref_to_extract_taxid = defaultdict(list)  # Mapping from reference taxid to set of qualified taxids to extract
 
-def load_match_criteria_from_log(gottcha_log: str) -> Tuple[float, float, int]:
+def load_criteria_from_log(gottcha_log: str) -> Tuple[float, float, int, str]:
     """Parse match parameters from the gottcha log file."""
     try:
         with open(gottcha_log) as f:
@@ -26,19 +26,26 @@ def load_match_criteria_from_log(gottcha_log: str) -> Tuple[float, float, int]:
                     match_fraction = float(line.split(" ")[-1].strip())
                 elif "Min Match Length" in line:
                     match_length = int(line.split(" ")[-1].strip())
-            return (match_identity, match_fraction, match_length)
+                elif "SNI-score" in line:
+                    sniScore = line.split(" ")[-1].strip()
+            return (match_identity, match_fraction, match_length, sniScore)
     except Exception as e:
         logging.error(f"Error parsing gottcha log file {gottcha_log}: {e}")
         sys.exit(1)
 
 
-def parse_taxids(taxid_arg: str, res_df: pd.DataFrame, full_tsv_fn: str) -> Tuple[dict, list]:
+def parse_taxids(taxid_arg: str, 
+                 res_df: pd.DataFrame, 
+                 full_tsv_fn: str,
+                 sni_score_cutoff: float,
+                 sni_score_species: float,
+                 sni_score_strain: float) -> Tuple[dict, list]:
     """Parse taxids from command line arg or file"""
 
-    taxa_list = []
-    qualified_taxa = pd.DataFrame()
+    global ref_to_extract_taxid
     taxa_df = pd.DataFrame()
 
+    # Load the full report TSV if available, otherwise use the res_df from memory
     if res_df.shape[1] > 0:
         taxa_df = res_df
         logging.info(f"Successfully loaded result summary with {len(taxa_df)} taxonomic entries")
@@ -46,22 +53,38 @@ def parse_taxids(taxid_arg: str, res_df: pd.DataFrame, full_tsv_fn: str) -> Tupl
         try:
             logging.info(f"Reading result summary file {full_tsv_fn}...")
             taxa_df = pd.read_csv(full_tsv_fn,
-                                sep='\t',
-                                engine='python',
-                                quoting=3,
-                                on_bad_lines='skip',
-                                dtype={'NOTE': str})
+                                  sep='\t',
+                                  quoting=3,
+                                  on_bad_lines='skip',
+                                  dtype={'NOTE': str, 'TAXID': str, 'PARENT_TAXID': str})
 
             logging.info(f"Successfully loaded result summary with {len(taxa_df)} entries")
         except Exception as e:
             logging.error(f"Error reading result summary file: {e}")
             sys.exit(1)
 
-    # Filter in entries specified by taxid_arg
-    filtered_idx = None
+    # get full lineages of each strain-level taxid in the report
+    df = taxa_df[['LEVEL','NAME', 'SNI_SCORE', 'TAXID', 'PARENT_TAXID']]
+    df_lineages = df[df['LEVEL']=='strain'].copy().reset_index(drop=True)
+    df_lineages = df_lineages.rename(columns={'TAXID':'strain', 'PARENT_TAXID':'species'})
 
-    if 'NOTE' in taxa_df.columns:
-        filtered_idx = ~taxa_df['NOTE'].str.contains('Filtered out', na=False)
+    RANKS = ["species", "genus", "family", "order", "class", "phylum", "superkingdom"]
+
+    for idx, RANK in enumerate(RANKS):
+        rank_df = df[df['LEVEL']==RANK].reset_index(drop=True).copy()
+        rank_df[RANK] = rank_df['TAXID']
+        df_lineages = df_lineages.merge(rank_df[[RANK,'PARENT_TAXID']], on=RANK, how='left')
+
+        if idx == len(RANKS)-1:
+            next_rank = 'root'
+        else:
+            next_rank = RANKS[idx+1]
+        df_lineages = df_lineages.rename(columns={'PARENT_TAXID':next_rank})
+
+    logging.debug(f"Initial lineages dataframe:\n{df_lineages.head()}")
+
+    # expand the input taxa for extracction to the taxid in the restuls, and store to qualified_taxa
+    qualified_idx = pd.Series([True]*len(taxa_df))
 
     if taxid_arg and taxid_arg != 'all':
         if taxid_arg.startswith('@'):
@@ -78,41 +101,35 @@ def parse_taxids(taxid_arg: str, res_df: pd.DataFrame, full_tsv_fn: str) -> Tupl
             taxa_list = [x.strip() for x in taxid_arg.split(',')]
 
         if taxa_list:
-            filtered_idx &= (taxa_df['TAXID'].isin(taxa_list) | taxa_df['NAME'].isin(taxa_list))
+            qualified_idx &= (taxa_df['TAXID'].isin(taxa_list) | taxa_df['NAME'].isin(taxa_list))
+
+    logging.info(f"Found {qualified_idx.sum()} qualified taxa after filtering by taxid/name")
 
     # Filter out entries with "Filtered out" notes
-    if filtered_idx is not None:
-        qualified_taxa = taxa_df[filtered_idx]
-        logging.info(f"Found {len(qualified_taxa)} qualified taxa after filtering")
+    if qualified_idx is not None:
+        qualified_taxa = taxa_df.loc[qualified_idx, ['LEVEL', 'TAXID']].copy()
     else:
-        qualified_taxa = taxa_df
+        qualified_taxa = taxa_df[['LEVEL', 'TAXID']].copy()
 
-    # Ensure these columns exist
-    if not all(col in qualified_taxa.columns for col in ['LEVEL', 'NAME', 'TAXID']):
-        logging.error(f"Required columns missing in taxonomy file. Available columns: {qualified_taxa.columns.tolist()}")
-        sys.exit(1)
+    # Further filter by SNI score thresholds
+    for level, extract_taxid in qualified_taxa.itertuples(index=False):
+        # set sni cutoff
+        if level == 'strain':
+            sni_score_cutoff = sni_score_strain
+        elif level == 'species':
+            sni_score_cutoff = sni_score_species
+        
+        logging.debug(f"Processing - level: {level}; taxid: {extract_taxid}; sni_cutoff: {sni_score_cutoff}")
 
-    # Pre-compute a mapping from reference taxids to qualified taxids
-    # This avoids expensive lineage lookups during processing
-    logging.info("Building taxonomy lookup index...")
+        idx = (df_lineages[level]==extract_taxid) & (df_lineages['SNI_SCORE']>=sni_score_cutoff)
+        for ref_taxid in df_lineages[idx]['strain']:
+            ref_to_extract_taxid[ref_taxid].append(extract_taxid)
 
-    taxa_dict = {}
+    if len(ref_to_extract_taxid) == 0:
+        logging.warning("No qualified taxa for extraction. No reads can be extracted.")
+        sys.exit(0)
 
-    # Gather all qualified taxids
-    qualified_taxids = []
-    for _, row in qualified_taxa[['LEVEL', 'NAME', 'TAXID']].iterrows():
-        if pd.notna(row['TAXID']):
-            taxid = str(row['TAXID']).strip()
-            qualified_taxids.append(taxid)
-            taxa_dict[taxid] = {
-                'level': str(row['LEVEL']).replace(' ', '_') if pd.notna(row['LEVEL']) else 'unknown',
-                'name': str(row['NAME']).replace(' ', '_') if pd.notna(row['NAME']) else 'unknown'
-            }
-
-    logging.debug(f"Qualified taxa:\n{qualified_taxa}")
-    logging.debug(f"Qualified taxids: {qualified_taxids}")
-
-    return taxa_dict, qualified_taxids
+    return taxa_df.set_index('TAXID')[['LEVEL','NAME']].to_dict(orient='index'), ref_to_extract_taxid
 
 
 def _init_worker(bam_path: str,
@@ -150,7 +167,7 @@ def _iter_tasks(references: List[str],
                 acc_list_action: str
                 ) -> Iterable[Tuple[str, int, int]]:
     
-    global lineage_cache
+    global ref_to_extract_taxid
 
     for ref in references:
         # Extract taxid from reference
@@ -159,6 +176,9 @@ def _iter_tasks(references: List[str],
         except ValueError:
             logging.debug(f"Malformed reference: {ref}")
             continue  # Skip malformed references
+
+        if ref_taxid not in ref_to_extract_taxid:
+            continue  # Skip references that don't belong to any qualified taxon
 
         # Skip if accession is in the exclusion list (if applicable)
         aoi_flag = False
@@ -171,7 +191,7 @@ def _iter_tasks(references: List[str],
                 if acc_list_action == 'filter_in':
                     continue
 
-        if len(lineage_cache[ref_taxid]) > 0:
+        if len(ref_to_extract_taxid[ref_taxid]) > 0:
             yield (ref, max_per_taxon, aoi_flag)
 
 
@@ -183,14 +203,14 @@ def _extract_worker(task: Tuple[str, int, bool]) -> dict:
       (rname, start0, end0, numreads, covbases, mismatches_total,
        consensus_diff, mean_depth)
     """
-    global _BAM, _CFG, lineage_cache
+    global _BAM, _CFG, ref_to_extract_taxid
     assert _BAM is not None, "Worker BAM handle not initialized"
     
-    taxon_seqs = {}  # Dictionary to hold sequences for each taxid
+    taxon_seqs = defaultdict(list)  # Dictionary to hold sequences for each taxid
     ref, max_per_taxon, aoi_flag = task
     
     try:
-        acc, rstart, rend, ref_taxid, _ = ref.split('|')
+        ref_taxid = ref.split('|')[3]
     except ValueError:
         logging.debug(f"Malformed reference: {ref}")
 
@@ -235,19 +255,14 @@ def _extract_worker(task: Tuple[str, int, bool]) -> dict:
         if min_alen > 0 and aln.alen < min_alen:
             continue
 
-        matching_taxids = lineage_cache[ref_taxid]
-
         # Process the matching taxa
-        for taxid in matching_taxids:
-            # Initialize list for this taxid if needed
-            if taxid not in taxon_seqs:
-                taxon_seqs[taxid] = []
+        for extract_taxid in ref_to_extract_taxid[ref_taxid]:
 
             # Only collect up to max_per_taxon sequences per taxon
-            if (max_per_taxon==0) or (len(taxon_seqs[taxid]) < max_per_taxon):
+            if (max_per_taxon==0) or (len(taxon_seqs[extract_taxid]) < max_per_taxon):
                 # Create FASTA entry with taxonomy information
-                level = taxa_dict[taxid]['level']
-                name = taxa_dict[taxid]['name']
+                level = taxa_dict[extract_taxid]['LEVEL']
+                name = taxa_dict[extract_taxid]['NAME'].replace(' ', '_')  # Replace spaces with underscores for FASTA headers
                 rname = aln.query_name
                 region = (aln.reference_start+1, aln.reference_end)
                 mapping_idt = 1 - (aln.get_tag('NM') / aln.alen) if aln.has_tag('NM') else 0
@@ -259,18 +274,18 @@ def _extract_worker(task: Tuple[str, int, bool]) -> dict:
                     mate = '.1' if aln.is_read1 else '.2'
 
                 if format == 'fasta':
-                    fasta_entry = f">{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag} MG={aln.alen} MI={mapping_idt:.2f} MF={mapping_frac:.2f}\n{aln.query_sequence}\n"
+                    fasta_entry = f">{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={extract_taxid} AOI={aoi_flag} MG={aln.alen} MI={mapping_idt:.2f} MF={mapping_frac:.2f}\n{aln.query_sequence}\n"
                 else:
-                    fasta_entry = f"@{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={taxid} AOI={aoi_flag} MG={aln.alen} MI={mapping_idt:.2f} MF={mapping_frac:.2f}\n{aln.query_sequence}\n+\n{aln.query_qualities_str}\n"
+                    fasta_entry = f"@{rname}{mate}|{ref}:{region[0]}..{region[1]} LEVEL={level} NAME={name} TAXID={extract_taxid} AOI={aoi_flag} MG={aln.alen} MI={mapping_idt:.2f} MF={mapping_frac:.2f}\n{aln.query_sequence}\n+\n{aln.query_qualities_str}\n"
                 
-                taxon_seqs[taxid].append(fasta_entry)
+                taxon_seqs[extract_taxid].append(fasta_entry)
 
     return taxon_seqs
 
 
 def extract_sequences_by_taxonomy(bam_path: str,
                                   taxa_dict: dict,
-                                  qualified_taxids: list,
+                                  ref_to_extract_taxid: dict,
                                   o,
                                   numthreads: int,
                                   matchFraction: float,
@@ -301,11 +316,6 @@ def extract_sequences_by_taxonomy(bam_path: str,
         tuple: (taxon_count, seq_count) - Number of taxa and total sequences extracted
     """
 
-    global lineage_cache
-
-    logging.debug(f"taxa_dict: {taxa_dict}...")
-    logging.debug(f"qualified_taxids: {qualified_taxids}...")
-
     if not os.path.exists(bam_path):
         logging.fatal(f"ERROR: BAM not found: {bam_path}")
         return 2
@@ -320,34 +330,6 @@ def extract_sequences_by_taxonomy(bam_path: str,
     except Exception as e:
         logging.fatal(f"ERROR: Failed to open BAM: {e}")
         return 2
-
-    # Pre-compute a mapping from reference taxids to qualified taxids to avoid expensive lineage lookups during processing
-    for ref in references:
-        # Extract taxid from reference
-        try:
-            ref_taxid = ref.split('|')[3]
-        except ValueError:
-            logging.debug(f"Malformed reference: {ref}")
-            continue  # Skip malformed references
-
-        # Check if we already know what qualified taxa this reference belongs to
-        if ref_taxid in lineage_cache:
-            matching_taxids = lineage_cache[ref_taxid]
-        else:
-            # If not, find all qualified taxa this reference belongs to
-            matching_taxids = []
-            ref_lineage = None
-
-            for q_taxid in qualified_taxids:
-                # Avoid recomputing the lineage for each taxid check
-                if ref_lineage is None:
-                    ref_lineage = taxonomy.taxid2fullLineage(ref_taxid, space2underscore=False)
-
-                if f"|{q_taxid}|" in ref_lineage:
-                    matching_taxids.append(q_taxid)
-
-            # Cache the result
-            lineage_cache[ref_taxid] = matching_taxids
 
     # Generate tasks for worker processes
     tasks = _iter_tasks(references, max_per_taxon, acc_list, acc_list_action)
@@ -371,7 +353,7 @@ def extract_sequences_by_taxonomy(bam_path: str,
         ),
     )
 
-    logging.info(f"Starting extraction for {len(qualified_taxids)} qualified taxa...")
+    logging.info(f"Starting extraction for qualified taxa...")
 
     try:
         mapper = pool.imap_unordered
@@ -396,7 +378,6 @@ def extract_sequences_by_taxonomy(bam_path: str,
     finally:
         pool.close()
         pool.join()
-
 
     # Write sequences to output file
     logging.info("Writing sequences to output file...")
