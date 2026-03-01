@@ -129,21 +129,21 @@ def parse_args(ver, args):
                     help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0.95]")
 
     p.add_argument('-mg','--matchLength', metavar='<INT>', type=int,
-                    help="Minimum length of the alignment required to be considered a valid match. [default: 100]")
+                    help="Minimum length (bp) of the alignment required to be considered a valid match. [default: 100]")
 
     p.add_argument('-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str, default='0.9,0.95,0.99',
                     help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
 
-    p.add_argument('-Mc','--minCov', metavar='<FLOAT>', type=float, default=0,
+    p.add_argument('-Mc','-mc','--minCov', metavar='<FLOAT>', type=float, default=0,
                     help="Minimum signature coverage to be considered valid in abundance calculation. [default: 0]")
 
-    p.add_argument('-Mr','--minReads', metavar='<INT>', type=int, default=0,
+    p.add_argument('-Mr','-mr','--minReads', metavar='<INT>', type=int, default=0,
                     help="Minimum number of reads to be considered valid in abundance calculation. [default: 0]")
 
-    p.add_argument('-Ml','--minLen', metavar='<INT>', type=int, default=0,
+    p.add_argument('-Ml','-ml','--minLen', metavar='<INT>', type=int, default=0,
                     help="Minimum signature length to be considered valid in abundance calculation. [default: 0]")
 
-    p.add_argument('-Mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
+    p.add_argument('-Mz','-mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
                     help="Maximum estimated z-score for the depths of the mapped region. Set to 0 to disable. [default: 0]")
 
     p.add_argument('-nc','--noCutoff', action="store_true",
@@ -271,33 +271,32 @@ def parse_args(ver, args):
 
     # If mi/mf/mg are not specified, set them to default values based on whether --nanopore is specified
     # But if --extractOnly is specified, do not set default values for matchIdentity and matchFraction, the value will be load from the log file if not provided
-    if args_parsed.matchIdentity:
-        if args_parsed.matchIdentity < 0 or args_parsed.matchIdentity > 1:
-            p.error('--matchIdentity must be between 0 and 1.')
-    else:
+    if args_parsed.matchIdentity is None:
         if not args_parsed.extractOnly:
             if args_parsed.nanopore:
                 args_parsed.matchIdentity = 0.85
             else:
                 args_parsed.matchIdentity = 0.95
-
-    if args_parsed.matchFraction:
-        if args_parsed.matchFraction < 0 or args_parsed.matchFraction > 1:
-            p.error('--matchFraction must be between 0 and 1.')
     else:
+        if args_parsed.matchIdentity < 0 or args_parsed.matchIdentity > 1:
+            p.error('--matchIdentity must be between 0 and 1.')
+
+    if args_parsed.matchFraction is None:
         if not args_parsed.extractOnly:
             if args_parsed.nanopore:
                 args_parsed.matchFraction = 0.85
             else:
                 args_parsed.matchFraction = 0.95
-
-    if args_parsed.matchLength:
-        if args_parsed.matchLength < 0:
-            p.error('--matchLength must >1.')
     else:
+        if args_parsed.matchFraction < 0 or args_parsed.matchFraction > 1:
+            p.error('--matchFraction must be between 0 and 1.')
+
+    if args_parsed.matchLength is None:
         if not args_parsed.extractOnly:
             args_parsed.matchLength = 100
-
+    else:
+        if args_parsed.matchLength < 0:
+            p.error('--matchLength must be a non-negative integer.')
 
     if args_parsed.extractFullRef:
         args_parsed.extract = 'all:20:fasta'
