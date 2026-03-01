@@ -250,7 +250,7 @@ def _extract_worker(task: Tuple[str, int, bool]) -> dict:
                 name = taxa_dict[taxid]['name']
                 rname = aln.query_name
                 region = (aln.reference_start+1, aln.reference_end)
-                mapping_idt = aln.get_tag('NM') / aln.alen if aln.has_tag('NM') else 0
+                mapping_idt = 1 - (aln.get_tag('NM') / aln.alen) if aln.has_tag('NM') else 0
                 mapping_frac = max((aln.alen / aln.query_length), (aln.alen / bam.get_reference_length(ref))) if bam.get_reference_length(ref) > 0 else 0
 
                 # determine if the read is the first or second mate
