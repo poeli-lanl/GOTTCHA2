@@ -15,6 +15,23 @@ from . import taxonomy
 taxa_dict = {}
 lineage_cache = {}  # Cache for reference taxid to qualified taxids mapping
 
+def load_match_criteria_from_log(gottcha_log: str) -> Tuple[float, float, int]:
+    """Parse match parameters from the gottcha log file."""
+    try:
+        with open(gottcha_log) as f:
+            for line in f:
+                if "Min Match Identity" in line:
+                    match_identity = float(line.split(" ")[-1].strip())
+                elif "Min Match Fraction" in line:
+                    match_fraction = float(line.split(" ")[-1].strip())
+                elif "Min Match Length" in line:
+                    match_length = int(line.split(" ")[-1].strip())
+            return (match_identity, match_fraction, match_length)
+    except Exception as e:
+        logging.error(f"Error parsing gottcha log file {gottcha_log}: {e}")
+        sys.exit(1)
+
+
 def parse_taxids(taxid_arg: str, res_df: pd.DataFrame, full_tsv_fn: str) -> Tuple[dict, list]:
     """Parse taxids from command line arg or file"""
 
