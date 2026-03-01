@@ -572,23 +572,22 @@ def main(args):
         logfile_exist = bamfile.replace(".bam", ".log")
 
         # if match criteria (mi/mf/mg) are not provided, load them from the log file
-        if Path(logfile_exist).is_file():
+        if Path(logfile_exist).is_file() and \
+                    (argvs.matchIdentity is None) and \
+                        (argvs.matchFraction is None) and \
+                            (argvs.matchLength is None):
             (mi, mf, mg) = extract_reads.load_match_criteria_from_log(logfile_exist)
-            if not argvs.matchIdentity:
-                argvs.matchIdentity = mi
-            if not argvs.matchFraction:
-                argvs.matchFraction = mf
-            if not argvs.matchLength:
-                argvs.matchLength = mg
+            argvs.matchIdentity = mi
+            argvs.matchFraction = mf
+            argvs.matchLength = mg
         else:
             logfile_exist = None
-            if not argvs.matchIdentity:
+            if argvs.matchIdentity is None:
                 argvs.matchIdentity = 0
-            if not argvs.matchFraction:
+            if argvs.matchFraction is None:
                 argvs.matchFraction = 0
-            if not argvs.matchLength:
+            if argvs.matchLength is None:
                 argvs.matchLength = 0
-            logging.warning(f"Log file {logfile_exist} not found. Match criteria (mi/mf/mg) will be set to 0 (unlimited).")
 
     # display the command line
     logging.info(' '.join(sys.argv))
@@ -608,7 +607,7 @@ def main(args):
         print_message(f"    Input BAM File     : {bamfile}",           argvs.silent, begin_t, logfile)
     if argvs.nanopore:
         print_message(f"    Nanopore Mode      : Enabled",              argvs.silent, begin_t, logfile)
-    if argvs.errorRate >= 0.0:
+    if argvs.errorRate:
         print_message(f"    Read Error Rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile)
     if argvs.accList:
         print_message(f"    AOI List           : {argvs.accList}", argvs.silent, begin_t, logfile)
@@ -626,11 +625,11 @@ def main(args):
         print_message(f"    Extract Only       : {argvs.extractOnly}", argvs.silent, begin_t, logfile)
     if logfile_exist:
         print_message(f"    Match criteria from: {logfile_exist}",      argvs.silent, begin_t, logfile)
-    if argvs.matchIdentity > 0:
+    if argvs.matchIdentity != None:
         print_message(f"    Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile)
-    if argvs.matchFraction > 0:
+    if argvs.matchFraction != None:
         print_message(f"    Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile)
-    if argvs.matchLength > 0:
+    if argvs.matchLength != None:
         print_message(f"    Min Match Length   : {argvs.matchLength}", argvs.silent, begin_t, logfile)
     if argvs.maxZscore > 0:
         print_message(f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile)
