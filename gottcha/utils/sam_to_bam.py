@@ -27,8 +27,7 @@ def convert_sam_to_bam(input_sam: str, output_bam: str, threads=4, quiet=False) 
                          header=None,
                          usecols=[2, 6],
                          names=['REF', 'MATE_REF'],
-                         dtype='str',
-                         low_memory=False)
+                         dtype='str')
 
         logging.debug(f"Sample of REF/MATE_REF columns:\n{df.head()}")
 
