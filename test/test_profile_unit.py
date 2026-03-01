@@ -38,7 +38,7 @@ class TestProfileUtils(unittest.TestCase):
             args = profile.parse_args("test", ["profile", "-i", read_path, "-d", db_prefix, "-np"])
 
             self.assertEqual(args.matchIdentity, 0.85)
-            self.assertEqual(args.matchFraction, 0)
+            self.assertEqual(args.matchFraction, 0.85)
             self.assertEqual(args.errorRate, 0.03)
 
     def test_parse_args_extractfullref_and_nocutoff(self):

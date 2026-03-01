@@ -74,14 +74,12 @@ def infer_sni_score(df: pd.DataFrame, error_rate: float) -> pd.DataFrame:
     id_low, id_high = center - hw, center + hw
 
     # convert to true SCORE by adding the sequencing-error penalty
-    score_naive = np.minimum(1, p)
     score_low  = np.clip(id_low, 0, 1)
     score_high = np.clip(id_high, 0, 1)
 
     score_ci95 = "[" + score_low.round(6).astype(str) + "-" + score_high.round(6).astype(str) + "]"
 
     df = df.assign(
-        SNI_NAIVE    = score_naive.round(6),
         SNI_SCORE    = center.round(6),
         SNI_CI95_LH  = score_ci95
     )
@@ -325,7 +323,7 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
             # pull out the low/high bounds from those rows
             idx = str_df.groupby('LVL_NAME')['SNI_SCORE'].idxmax()
             score_bounds = ( str_df
-                        .loc[idx, ['LVL_NAME', 'SNI_NAIVE', 'SNI_CI95_LH']]
+                        .loc[idx, ['LVL_NAME', 'SNI_CI95_LH']]
                         .set_index('LVL_NAME') )
             lvl_df = lvl_df.join(score_bounds).reset_index()
 
@@ -382,8 +380,8 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
     # add additional columns
     rep_df = rep_df.assign(
         SIG_COV                = rep_df["COVERED_SIG_LEN"]/rep_df["TOTAL_SIG_LEN"],
-        READ_IDT               = (rep_df["TOTAL_BP_MAPPED"]-rep_df["TOTAL_BP_MISMATCH"])/rep_df["TOTAL_READ_LEN"],
-        CONSENSUS_REF_IDT      = 1-(rep_df['CONSENSUS_DIFF']/rep_df["COVERED_SIG_LEN"]),
+        READ_WT_SNI            = 1-(rep_df["TOTAL_BP_MISMATCH"]/rep_df["TOTAL_READ_LEN"]),
+        CONSENSUS_SEQ_SNI      = 1-(rep_df['CONSENSUS_DIFF']/rep_df["COVERED_SIG_LEN"]),
         COVERED_MAPPED_SIG_COV = rep_df["COVERED_SIG_LEN"]/rep_df["MAPPED_SIG_LEN"],
         COVERED_SIG_DEPTH      = rep_df["TOTAL_BP_MAPPED"]/rep_df["COVERED_SIG_LEN"],
     )

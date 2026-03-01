@@ -77,7 +77,7 @@ def parse_args(ver, args):
                     help="""Specify the path to the taxonomy information directory or file. The program will attempt to locate a matching .tax.tsv file for the specified database. If it cannot find one, it will use the ‘taxonomy_db’ directory located in the same directory as the executable by default.""")
 
     p.add_argument( '-np','--nanopore', action="store_true",
-                    help="Indicate that the input reads are from Oxford Nanopore sequencing platform. This option enables read splitting and error rate set to 0.03 if not specified.")
+                    help="""Indicate that the input reads are sequenced from Oxford Nanopore (ONT) sequencing platform. This option enables read preprocessing and set "-er 0.03 -mi 0.9 -mf 0.9 -ml 100" by default.""")
 
     p.add_argument('-e', '--extract', metavar='TAXON[,TAXON2,...]', type=str, default=None,
                     help=(
@@ -128,7 +128,7 @@ def parse_args(ver, args):
                     help="The minimap2 mapping options for short reads. Do not use this option unless you know what you are doing. [default: 'auto']")
 
     p.add_argument( '-mi','--matchIdentity', metavar='<FLOAT>', type=float,
-                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0.95 for short reads, 0.9 for nanopore reads]")
+                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0.95]")
 
     p.add_argument( '-mf','--matchFraction', metavar='<FLOAT>', type=float, default=0.95,
                     help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0.95]")
@@ -281,7 +281,7 @@ def parse_args(ver, args):
     if args_parsed.matchIdentity is None:
          if args_parsed.nanopore:
             args_parsed.matchIdentity = 0.85
-            args_parsed.matchFraction = 0
+            args_parsed.matchFraction = 0.85
          else:
             args_parsed.matchIdentity = 0.95
 
@@ -585,10 +585,10 @@ def main(args):
         print_message( f"    Minimal SIG Length : {argvs.minLen}",      argvs.silent, begin_t, logfile)
     if argvs.minReads > 0:
         print_message( f"    Minimal Reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile)
-    if argvs.matchFraction > 0:
-        print_message( f"    Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile)
     if argvs.matchIdentity > 0:
         print_message( f"    Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile)
+    if argvs.matchFraction > 0:
+        print_message( f"    Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile)
     if argvs.matchLength > 0:
         print_message( f"    Min Match Length   : {argvs.matchLength}", argvs.silent, begin_t, logfile)
     if argvs.maxZscore > 0:
@@ -667,7 +667,7 @@ def main(args):
         gc.collect()
 
     # preprocess SAM file for nanopore reads
-    if argvs.nanopore:
+    if argvs.nanopore and Path(samfile).is_file():
         # remove inconsistent read chunks from the SAM file
         print_message( "Removing inconsistent read chunks from SAM file...", argvs.silent, begin_t, logfile)
         samfile_output = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
@@ -680,7 +680,7 @@ def main(args):
         print_message( f" - {tol_chunks_count-tol_chunks_qualified} inconsistent hits removed", argvs.silent, begin_t, logfile)
         gc.collect()
 
-    # processing SAM file and generate results
+    # processing alignments and generate results
     if not argvs.extractOnly:
         if os.path.isfile(os.path.abspath(samfile)):
             print_message( "Converting to BAM file...", argvs.silent, begin_t, logfile)

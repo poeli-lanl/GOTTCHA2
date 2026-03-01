@@ -27,13 +27,13 @@ def generate_report_file(rep_df: pd.DataFrame, o: str, fullreport_o: str, fmt: s
             # parents 12-13
             'PARENT_NAME', 'PARENT_TAXID',
             # read stats 14-18
-            'AOI_READ_COUNT', 'TOTAL_READ_LEN', 'TOTAL_BP_MISMATCH', 'TOTAL_BP_INDEL', 'READ_IDT',
-            # signature stats 19-27
-            'CONSENSUS_REF_IDT', 'SNI_NAIVE', 'SNI_CI95_LH', 'SIG_COV', 'MAPPED_SIG_LEN',
-            'TOTAL_SIG_LEN', 'COVERED_SIG_DEPTH', 'COVERED_MAPPED_SIG_COV', 'ZSCORE',
-            # abundance 28-30
+            'AOI_READ_COUNT', 'TOTAL_READ_LEN', 'TOTAL_BP_MISMATCH', 'TOTAL_BP_INDEL', 'READ_WT_SNI',
+            # signature stats 19-26
+            'CONSENSUS_SEQ_SNI', 'SNI_CI95_LH', 'SIG_COV', 'MAPPED_SIG_LEN', 'TOTAL_SIG_LEN', 
+            'COVERED_SIG_DEPTH', 'COVERED_MAPPED_SIG_COV', 'ZSCORE',
+            # abundance 27-29
             'GENOMIC_CONTENT_EST', 'ABUNDANCE', 'REL_ABUNDANCE_DEPTH',
-            # ref genome 31-33
+            # ref genome 30-32
             'SIG_LEVEL', 'GENOME_COUNT', 'GENOME_SIZE', 'NOTE']
 
     # replace SIG_LEVEL back to their original ranks
