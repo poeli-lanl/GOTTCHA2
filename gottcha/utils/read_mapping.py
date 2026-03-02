@@ -105,12 +105,17 @@ def post_processing_sam(samfile: str, samfile_temp: str) -> bool:
 
         logging.info(f'Writing top score hits...')
         with open(samfile_temp, 'w') as fout, open(samfile, 'r') as fin:
+            lines_to_write = []
             for idx, line in enumerate(fin):
-                if idx > 0 and idx % 100000 == 0:
-                    logging.debug(f'Processed {idx} lines...')
-
                 if idx in idxmax_set:
-                    fout.write(line)
+                    lines_to_write.append(line)
+                    if len(lines_to_write) >= 1000:
+                        fout.writelines(lines_to_write)
+                        lines_to_write.clear()
+                        logging.debug(f'Written {idx} alignments...')
+
+            if lines_to_write:
+                fout.writelines(lines_to_write)
         logging.info(f'{len(idxmax_set)} hits written to {samfile_temp}.')
 
         return True, aln_count, len(idxmax_set)

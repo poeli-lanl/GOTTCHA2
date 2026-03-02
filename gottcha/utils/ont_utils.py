@@ -219,15 +219,21 @@ def split_reads_samfile_postprocessing(samfile, samfile_temp):
 
     logging.info(f'Writing qualified hits...')
     with open(samfile_temp, 'w') as fout, open(samfile, 'r') as fin:
+        lines_to_write = []            
         for idx, line in enumerate(fin):
-            if not idx%100000:
-                logging.debug(f'Processed {idx} lines...')
-
             if idx in idxmax_set:
                 if idx in idx1st_set:
-                    fout.write(f"{line.rstrip()}\tZC:i:1\n")
+                    lines_to_write.append(f"{line.rstrip()}\tZC:i:1\n")
                 else:
-                    fout.write(line)
+                    lines_to_write.append(line)
+
+                if len(lines_to_write) >= 1000:
+                    fout.writelines(lines_to_write)
+                    lines_to_write.clear()
+                    logging.debug(f'Written {idx} alignments...')
+
+        if lines_to_write:
+            fout.writelines(lines_to_write)
 
     logging.info(f'Done writing {len(idxmax_set)} hits.')
 
