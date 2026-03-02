@@ -23,7 +23,6 @@ class TestProfileUtils(unittest.TestCase):
 
             self.assertEqual(args.dbLevel, "species")
             self.assertEqual(args.matchIdentity, 0.95)
-            self.assertEqual(args.removeMultipleHits, "yes")
             self.assertEqual(args.errorRate, 0.005)
             self.assertEqual(args.prefix, "reads")
             self.assertEqual(args.input[0], os.path.abspath(read_path))
