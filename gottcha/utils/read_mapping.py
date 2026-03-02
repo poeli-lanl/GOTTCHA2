@@ -1,5 +1,7 @@
+import re
 import subprocess
 import logging
+import sys
 from typing import List, Tuple
 import pandas as pd
 import logging
@@ -31,6 +33,9 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
         )
     """
     input_file = " ".join(reads)
+    mapped_re = re.compile(r"mapped (\d+) sequences")
+    multi_part_index_flag = False
+    input_read_count = 0
 
     # Minimap2 options for short reads: the options here is essentailly the -x 'sr' equivalent with some modifications on scoring
     sr_opts = f"-x sr {mm_options} -a -N20 --eqx --secondary=no --sam-hit-only"
@@ -41,15 +46,51 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
     bash_cmd   = f"set -o pipefail; set -x;"
     mm2_cmd    = f"minimap2 {sr_opts} -t{threads} {db}.mmi {input_file}"
     filter_cmd = f"sed '/^@/d'"  # filter out header lines
-    cmd        = f"{bash_cmd} {mm2_cmd} 2>> {logfile} | {filter_cmd} > {samfile}"
+    cmd        = f"{bash_cmd} {mm2_cmd} | {filter_cmd} > {samfile}"
 
-    logging.info(f"Readmapping command: {mm2_cmd}")
+    # proc = subprocess.Popen(cmd, shell=True, executable='/bin/bash', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, universal_newlines=True, bufsize=1)
 
-    proc = subprocess.Popen(cmd, shell=True, executable='/bin/bash', stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    outs, errs = proc.communicate()
-    exitcode = proc.poll()
+    with open(samfile, "w") as out_f:
+        mm2 = subprocess.Popen(
+            mm2_cmd,
+            shell=True,
+            stdout=subprocess.PIPE,      # -> sed
+            stderr=subprocess.PIPE,      # <- you read THIS (minimap2 only)
+            text=True,
+            bufsize=1,
+        )
 
-    return exitcode, mm2_cmd, errs
+        sed = subprocess.Popen(
+            filter_cmd,
+            shell=True,
+            stdin=mm2.stdout,
+            stdout=out_f,
+            stderr=subprocess.PIPE,      # sed stderr (optional)
+            text=True,
+            bufsize=1,
+        )
+
+        mm2.stdout.close()  # allow mm2 to get SIGPIPE if sed exits
+
+        with open(logfile, "a") as f:
+            # Stream / parse minimap2 stderr
+            for line in mm2.stderr:
+                if "For a multi-part index" in line:
+                    multi_part_index_flag = True
+                
+                m = mapped_re.search(line)
+                if m:
+                    logging.debug(line)
+                    input_read_count += int(m.group(1))
+                f.write(line)
+
+        mm2.stderr.close()
+        sed.stderr.close()
+
+        rc_mm = mm2.wait()
+        rc_sed = sed.wait()
+
+    return rc_mm, mm2_cmd, input_read_count, multi_part_index_flag
 
 
 def post_processing_sam(samfile: str, samfile_temp: str) -> bool:

@@ -159,9 +159,6 @@ def parse_args(ver, args):
                           "'report_only': do not filter; report reads matching accession-of-interest in the list (AOI_READ_COUNT). "
                           "[default: report_only]"))
 
-    p.add_argument('-rm','--removeMultipleHits', choices=['yes', 'no', 'auto'], default='auto', type=str,
-                    help="The multiple hit removal step is automatically enabled for sequence input files and disabled for alignment files. Users can explicitly control this behavior by specifying 'yes' or 'no' to force the step to be enabled or disabled. [default: auto]")
-
     p.add_argument('-er','--errorRate', metavar='<FLOAT>', type=float,
                     help="Estimated error rate for sequencing data. [default: 0.005]")
 
@@ -265,13 +262,6 @@ def parse_args(ver, args):
 
         if not args_parsed.dbLevel:
             p.error('--dbLevel is missing and cannot be auto-detected.')
-
-    if args_parsed.removeMultipleHits == 'auto':
-        if args_parsed.input:
-            args_parsed.removeMultipleHits = "yes"
-        else:
-            args_parsed.removeMultipleHits = "no"
-
 
     # Set SNI-SCORE default to 0.9, species 0.95, strain 0.99
     if args_parsed.sniScore:
@@ -500,7 +490,6 @@ def print_message(msg, silent, start, logfile, errorout=0):
 
     with open(logfile, "a") as f:
         f.write(message)
-        f.close()
 
     if errorout:
         sys.exit(message)
@@ -526,8 +515,9 @@ def main(args):
     set_start_method("fork") # for default multiprocessing method
     acc_list = set()
     split_read_flag = False
+    multi_part_index_flag = False
     res_df = pd.DataFrame() # aggregated restuls
-    logfile_exist = ""
+    logfile_prev = ""
 
     logging_level = logging.WARNING
 
@@ -580,12 +570,12 @@ def main(args):
 
     if argvs.extractOnly:
         # repalce bamfile name to replace from ".gottcha_\w+.bam" to ".full.tsv"
-        logfile_exist = bamfile.replace(".bam", ".log")
+        logfile_prev = bamfile.replace(".bam", ".log")
         (mi, mf, mg, sni_argv) = (None, None, None, None)
 
         # if match criteria (mi/mf/mg) are not provided, load them from the log file
-        if Path(logfile_exist).is_file():
-            (mi, mf, mg, sni_argv) = extract_reads.load_criteria_from_log(logfile_exist)
+        if Path(logfile_prev).is_file():
+            (mi, mf, mg, sni_argv) = extract_reads.load_criteria_from_log(logfile_prev)
 
         if argvs.sniScore is None:
             argvs.sniScore = sni_argv
@@ -595,7 +585,7 @@ def main(args):
             argvs.matchFraction = mf
             argvs.matchLength = mg
         else:
-            logfile_exist = None
+            logfile_prev = None
             if argvs.matchIdentity is None:
                 argvs.matchIdentity = 0
             if argvs.matchFraction is None:
@@ -640,8 +630,8 @@ def main(args):
         print_message(f"    Extract Only       : {argvs.extractOnly}", argvs.silent, begin_t, logfile)
     if argvs.maxZscore > 0:
         print_message(f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile)
-    if logfile_exist:
-        print_message(f"    Load criteria from : {logfile_exist}",      argvs.silent, begin_t, logfile)
+    if logfile_prev:
+        print_message(f"    Load criteria from : {logfile_prev}",      argvs.silent, begin_t, logfile)
     if argvs.matchIdentity != None:
         print_message(f"    Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile)
     if argvs.matchFraction != None:
@@ -677,13 +667,13 @@ def main(args):
         else:
             print_message(f"ERROR: {argvs.database+'.stats'} not found.", argvs.silent, begin_t, logfile, errorout=1)
 
-        print_message(f" - {df_stats.shape[0]} entries loaded.", argvs.silent, begin_t, logfile)
+        print_message(f" - {df_stats.shape[0]:,} entries loaded.", argvs.silent, begin_t, logfile)
         print_message(f" - signatures at {df_stats['DB_level'].unique().tolist()} levels loaded.", argvs.silent, begin_t, logfile)
 
     if argvs.accList:
         print_message("Loading accession#s of interest list...", argvs.silent, begin_t, logfile)
         acc_list = load_acc_list(argvs.accList)
-        print_message(f" - {len(acc_list)} accession#s of interest loaded.", argvs.silent, begin_t, logfile)
+        print_message(f" - {len(acc_list):,} accession/signature of interest loaded.", argvs.silent, begin_t, logfile)
 
     #main process
     if argvs.input:
@@ -694,20 +684,20 @@ def main(args):
             split_read_flag = True
 
         print_message("Running read-mapping...", argvs.silent, begin_t, logfile)
-        exitcode, cmd, msg = read_mapping.minimap2(argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
-        print_message(f"Logfile saved to {logfile}.", argvs.silent, begin_t, logfile)
+        exitcode, cmd, input_read_count, multi_part_index_flag = read_mapping.minimap2(argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
         logging.info(f"COMMAND: {cmd}")
 
         if exitcode != 0:
             # if size of the samfile is zero
-            sys.exit("[%s] ERROR: error occurred while running read mapping (exit: %s, message: %s).\n" % (time_spend(begin_t), exitcode, msg))
+            print_message(f"Logfile saved to {logfile}.", argvs.silent, begin_t, logfile)
+            sys.exit("[%s] ERROR: error occurred while running read mapping (exit: %s).\n" % (time_spend(begin_t), exitcode))
         else:
-            print_message(f"Done mapping reads to {argvs.dbLevel} signature database.", argvs.silent, begin_t, logfile)
+            print_message(f" - {input_read_count:,} input reads processed.", argvs.silent, begin_t, logfile)
             print_message(f"Mapped SAM file saved to {samfile}.", argvs.silent, begin_t, logfile)
         gc.collect()
 
     # remove multiple hits
-    if argvs.removeMultipleHits == 'yes':
+    if multi_part_index_flag:
         # remove multiple hits from the SAM file
         print_message("Removing multiple hits from SAM file...", argvs.silent, begin_t, logfile)
         samfile_output = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
@@ -719,8 +709,8 @@ def main(args):
             # Note:
             # When input of the gottcha2 is a SAM file and new outdir/prefix is provided, the output will be saved to that location.
             # If not, the output will overwrite the original SAM file.
-            print_message(f" - {aln_count} total alignments", argvs.silent, begin_t, logfile)
-            print_message(f" - {top_hits_count} best hits among index-partitions", argvs.silent, begin_t, logfile)
+            print_message(f" - {aln_count:,} total alignments", argvs.silent, begin_t, logfile)
+            print_message(f" - {top_hits_count:,} best hits among index-partitions", argvs.silent, begin_t, logfile)
 
         gc.collect()
 
@@ -734,8 +724,8 @@ def main(args):
         if flag:
             os.rename(samfile_temp, samfile_output)
             samfile = samfile_output
-        print_message(f" - {tol_chunks_count} mapped read chunks processed", argvs.silent, begin_t, logfile)
-        print_message(f" - {tol_chunks_count-tol_chunks_qualified} inconsistent hits removed", argvs.silent, begin_t, logfile)
+        print_message(f" - {tol_chunks_count:,} mapped read chunks processed", argvs.silent, begin_t, logfile)
+        print_message(f" - {tol_chunks_count-tol_chunks_qualified:,} inconsistent hits removed", argvs.silent, begin_t, logfile)
         gc.collect()
 
     # processing alignments and generate results
@@ -767,8 +757,8 @@ def main(args):
             tol_alignment_count = str_df['READ_COUNT'].sum()
             tol_invalid_match_count = str_df['INVALID_ALNS'].sum()
 
-            print_message(f" - {tol_invalid_match_count} alignments did not meet matching criteria", argvs.silent, begin_t, logfile)
-            print_message(f" - {tol_alignment_count} qualified alignments processed", argvs.silent, begin_t, logfile)
+            print_message(f" - {tol_invalid_match_count:,} alignments did not meet matching criteria", argvs.silent, begin_t, logfile)
+            print_message(f" - {tol_alignment_count:,} qualified alignments processed", argvs.silent, begin_t, logfile)
 
             if not tol_alignment_count:
                 print_message("No qualified alignments found. Stopping.", argvs.silent, begin_t, logfile)
@@ -789,13 +779,13 @@ def main(args):
             res_df, aoi_read_count = aggregate_results.aggregate_taxonomy(*_args)
 
             if acc_list:
-                print_message(f" - {aoi_read_count} reads mapped to accession-of-interest", argvs.silent, begin_t, logfile)
+                print_message(f" - {aoi_read_count:,} reads mapped to accession-of-interest", argvs.silent, begin_t, logfile)
                 read_count_after_aoi = tol_alignment_count
                 if argvs.accListAction == 'filter_out':
                     read_count_after_aoi = tol_alignment_count - aoi_read_count
                 elif argvs.accListAction == 'filter_in':
                     read_count_after_aoi = aoi_read_count
-                print_message(f" - {read_count_after_aoi} reads after applying accession-of-interest action ({argvs.accListAction})", argvs.silent, begin_t, logfile)
+                print_message(f" - {read_count_after_aoi:,} reads after applying accession-of-interest action ({argvs.accListAction})", argvs.silent, begin_t, logfile)
 
             print_message("Done taxonomy aggregation.", argvs.silent, begin_t, logfile)
 
