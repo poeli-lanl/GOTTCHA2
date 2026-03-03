@@ -365,16 +365,11 @@ The full report ([prefix].full.tsv) includes the complete set of metrics along w
 | GENOME_SIZE            | Combined genome size used for GC estimate |
 | NOTE                   | Filter / rollup notes (e.g., cutoff failures or rank-bias checks) |
 
-### Identity / SNI notes
-
-- In recent releases, **SNI_SCORE is derived from consensus identity** computed via a majority-rule approach (the read-weighted identity is still reported but is no longer the primary SNI used for filtering/aggregation).
-- If you are comparing results across versions, keep in mind the identity/SNI computation change.
-
 ---
 
 ## Troubleshooting
 
-### BAM must be sorted + indexed
+### BAM must be sorted and indexed / Legacy SAM files
 
 If you provide `-b/--bam`, the BAM should be coordinate-sorted and indexed (`.bai`). For legacy SAM files, use:
 
@@ -390,10 +385,13 @@ If auto-discovery can’t find the right `*.tax.tsv`, pass it explicitly:
 gottcha2 profile --taxInfo /path/to/gottcha_db.species.fna.tax.tsv ...
 ```
 
+### Identity / SNI notes
+
+Starting v2.3.0, **SNI_SCORE is derived from consensus identity** computed via a majority-rule approach (the read-weighted identity is still reported but is no longer the primary SNI used for filtering/aggregation). If you are comparing results across versions, keep in mind the identity/SNI computation change.
+
 ---
 
 ## License and citation
 
 - License: **BSD 3-Clause** (see `LICENSE`).
 - If you use GOTTCHA2 in publications, please cite the GOTTCHA/GOTTCHA2 project and database source, and include the version used (see `gottcha2 version`).
-
