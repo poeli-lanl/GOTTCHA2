@@ -52,11 +52,9 @@ def parse_args(ver, args):
         SystemExit: If validation fails or --version is specified
     """
     command = args.pop(0) if args else None
-    p = ap.ArgumentParser(prog=f'gottcha2 {command}', description="""Genomic Origin Through Taxonomic CHAllenge (GOTTCHA) is an
-            annotation-independent and signature-based metagenomic taxonomic profiling tool
-            that has significantly smaller FDR than other profiling tools. This program
-            is a wrapper to map input reads to pre-computed signature databases using minimap2
-            and/or to profile mapped reads in SAM format. (VERSION: %s)""" % ver)
+    p = ap.ArgumentParser(prog=f'gottcha2 {command}', description="""Genomic Origin Through Taxonomic CHAllenge (GOTTCHA) is an annotation-independent, 
+                                 signature-based metagenomic taxonomic profiling tool with substantially low false discovery rates. 
+                                 This Python program maps input reads to precomputed signature databases using minimap2 and profiles the organisms present in a sample. (Version: %s)""" % ver)
 
     eg = p.add_mutually_exclusive_group(required=True)
 
