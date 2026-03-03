@@ -97,7 +97,7 @@ A typical database bundle includes:
 
 - `gottcha_db.<level>.fna.mmi` (minimap2 index; **required** for `profile -i ...`)
 - `*.tax.tsv` (taxonomy mapping; can be auto-discovered or passed via `--taxInfo`)
-- `*.stats.tsv` (signature length / genome size stats; used for coverage and GC estimates)
+- `*.stats` (signature length / genome size stats; used for coverage and abundance estimates)
 
 ### Download helper
 
@@ -226,7 +226,7 @@ Limit reads and choose output format with `:N:FORMAT`:
 gottcha2 extract -b sample.gottcha_species.bam -e "@taxids.txt:1000:fastq"
 ```
 
-Extract representative sequences per reference (up to 20) with:
+Extract up to 20 representative sequences for each profiled taxon using:
 
 ```bash
 gottcha2 profile -b sample.gottcha_species.bam --extractFullRef
@@ -327,7 +327,7 @@ Taxonomic profiling cutoffs:
 
 ## Full report fields
 
-The full report (`*.full.tsv`) contains detailed metrics and filtering notes.
+The full report ([prefix].full.tsv) includes the complete set of metrics along with filtering flags and notes. The summary report ([prefix].tsv) contains only the first 11 columns, representing the qualified taxonomic results.
 
 | Field Name             | Description |
 | ---------------------- | ----------- |
