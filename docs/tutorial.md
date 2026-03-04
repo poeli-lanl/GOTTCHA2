@@ -96,8 +96,8 @@ Prebuilt GOTTCHA2 databases are hosted here (may take a while to download):
 A typical database bundle includes:
 
 - `gottcha_db.<level>.fna.mmi` (minimap2 index; **required** for `profile -i ...`)
-- `*.tax.tsv` (taxonomy mapping; can be auto-discovered or passed via `--taxInfo`)
-- `*.stats` (signature length / genome size stats; used for coverage and abundance estimates)
+- `gottcha_db.<level>.tax.tsv` (taxonomy mapping; can be auto-discovered or passed via `--taxInfo`)
+- `gottcha_db.<level>.stats` (signature length / genome size stats; used for coverage and abundance estimates)
 
 ### Download helper
 

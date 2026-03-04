@@ -199,21 +199,26 @@ def parse_args(ver, args):
         if args_parsed.sniScore is None:
             args_parsed.sniScore='0.9,0.95,0.99'
 
+    # Auto-detect database path and prefix, and check the existence of input files and database index
     if args_parsed.database:
         #assign default path for database name
-        if "/" not in args_parsed.database and not os.path.isfile(args_parsed.database + ".mmi"):
-            bin_dir = os.path.dirname(os.path.realpath(__file__))
-            args_parsed.database = bin_dir + "/database/" + args_parsed.database
+        if Path(args_parsed.database).is_dir():
+            dbs = list(Path(args_parsed.database).glob("*.mmi"))
+            if len(dbs) > 1:
+                p.error(f'Multiple .mmi files found in {args_parsed.database}. Please specify one with database prefix.')
+            elif len(dbs) == 0:
+                p.error(f'No .mmi file found in {args_parsed.database}. Please specify the database prefix or the path to the .mmi file.')
+            else:
+                args_parsed.database = str(dbs[0])
 
-    if args_parsed.database and args_parsed.database.endswith(".mmi"):
-        args_parsed.database.replace('.mmi','')
+        if args_parsed.database.endswith(".mmi"):
+            args_parsed.database = args_parsed.database.replace('.mmi','')
 
-    if args_parsed.database and args_parsed.input:
-        if not os.path.isfile(args_parsed.database + ".mmi"):
-            p.error('Database index %s.mmi not found.' % args_parsed.database)
+        if args_parsed.input:
+            if not Path(args_parsed.database + ".mmi").is_file():
+                p.error('Database index %s.mmi not found.' % args_parsed.database)
 
     if args_parsed.input:
-        validated_inputs = []
         for path in args_parsed.input:
             if path == '-':
                 p.error('--input does not support reading from stdin ("-"). Please provide a file path.')
@@ -221,9 +226,8 @@ def parse_args(ver, args):
                 p.error(f'Input file {path} not found.')
 
     if args_parsed.bam:
-        bam_path = args_parsed.bam
-        if bam_path != '-' and not Path(bam_path).is_file():
-            p.error(f'BAM file {bam_path} not found.')
+        if not Path(args_parsed.bam).is_file():
+            p.error(f'BAM file {args_parsed.bam} not found.')
 
     if args_parsed.accList:
         if not Path(args_parsed.accList).is_file():
@@ -464,7 +468,7 @@ def load_database_stats(db_stats_file: str) -> pd.DataFrame:
     return df_stats
 
 
-def print_message(msg, silent, start, logfile, errorout=0):
+def print_message(msg: str, silent: bool, start: float, logfile: Path, errorout: int = 0):
     """
     Print and log a timestamped message.
 
@@ -475,7 +479,7 @@ def print_message(msg, silent, start, logfile, errorout=0):
         msg (str): Message to print
         silent (bool): If True, suppress output to stderr
         start (float): Start time for timestamp calculation
-        logfile (str): Path to the log file
+        logfile (Path): Path to the log file
         errorout (int): If non-zero, exit with error after printing
 
     Returns:
@@ -486,7 +490,7 @@ def print_message(msg, silent, start, logfile, errorout=0):
     """
     message = "[%s] %s\n" % (time_spend(start), msg)
 
-    with open(logfile, "a") as f:
+    with logfile.open("a", encoding="utf-8") as f:
         f.write(message)
 
     if errorout:
@@ -507,9 +511,9 @@ def main(args):
 
     argvs = parse_args(__version__, args)
     begin_t  = time.time()
-    bamfile  = argvs.bam if argvs.bam else f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.bam"
-    samfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
-    logfile  = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.log"
+    bamfile  = Path(argvs.bam) if argvs.bam else Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.bam"
+    samfile  = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
+    logfile  = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.log"
     set_start_method("fork") # for default multiprocessing method
     acc_list = set()
     split_read_flag = False
@@ -541,38 +545,36 @@ def main(args):
 
     #prepare output object
     argvs.relAbu = argvs.relAbu.upper()
-    outfile_full = "%s/%s.full.tsv" % (argvs.outdir, argvs.prefix)
-    outfile_lineage = "%s/%s.lineage.tsv" % (argvs.outdir, argvs.prefix)
-    outfile_mpa = "%s/%s.mpa.tsv" % (argvs.outdir, argvs.prefix)
+    outfile_full = Path(argvs.outdir) / f"{argvs.prefix}.full.tsv"
+    outfile_lineage = Path(argvs.outdir) / f"{argvs.prefix}.lineage.tsv"
+    outfile_mpa = Path(argvs.outdir) / f"{argvs.prefix}.mpa.tsv"
 
     # remove previous log file if exists
-    if os.path.isfile(logfile):
-        os.remove(logfile)
+    if logfile.is_file():
+        logfile.unlink()
 
     out_fp = sys.stdout
     outfile = "STDOUT"
 
     if not argvs.stdout and not argvs.extractOnly:
         #create output directory if not exists
-        if not os.path.exists(argvs.outdir):
-            os.makedirs(argvs.outdir)
+        Path(argvs.outdir).mkdir(parents=True, exist_ok=True)
 
-        outfile = "%s/%s.tsv" % (argvs.outdir, argvs.prefix)
+        outfile = Path(argvs.outdir) / f"{argvs.prefix}.tsv"
         if argvs.format == "csv":
-
-            outfile = "%s/%s.csv" % (argvs.outdir, argvs.prefix)
+            outfile = Path(argvs.outdir) / f"{argvs.prefix}.csv"
         elif argvs.format == "biom":
-            outfile = "%s/%s.biom" % (argvs.outdir, argvs.prefix)
+            outfile = Path(argvs.outdir) / f"{argvs.prefix}.biom"
 
-        out_fp = open(outfile, 'w')
+        out_fp = outfile.open("w", encoding="utf-8")
 
     if argvs.extractOnly:
-        # repalce bamfile name to replace from ".gottcha_\w+.bam" to ".full.tsv"
-        logfile_prev = bamfile.replace(".bam", ".log")
+        # repalce bamfile name from ".gottcha_\w+.bam" to ".log"
+        logfile_prev = bamfile.with_suffix(".log")
         (mi, mf, mg, sni_argv) = (None, None, None, None)
 
         # if match criteria (mi/mf/mg) are not provided, load them from the log file
-        if Path(logfile_prev).is_file():
+        if logfile_prev.is_file():
             (mi, mf, mg, sni_argv) = extract_reads.load_criteria_from_log(logfile_prev)
 
         if argvs.sniScore is None:
@@ -642,25 +644,25 @@ def main(args):
     #load taxonomy for taxonomic aggregation and annotation
     if not argvs.extractOnly:
         print_message("Loading taxonomy information...", argvs.silent, begin_t, logfile)
-        custom_taxa_tsv = None
-        dbpath = None
-        if os.path.isdir(argvs.taxInfo):
-            dbpath = argvs.taxInfo
-        elif os.path.isfile(argvs.taxInfo):
-            custom_taxa_tsv = argvs.taxInfo
-        elif os.path.isfile(argvs.database + ".tax.tsv"):
-            custom_taxa_tsv = argvs.database + ".tax.tsv"
 
-        logging.info(f"Taxonomy file: {custom_taxa_tsv}")
+        if Path(argvs.database + ".tax.tsv").exists():
+            custom_taxa_tsv = Path(argvs.database + ".tax.tsv")
+
+        dbpath = None
+        if argvs.taxInfo:
+            if Path(argvs.taxInfo).is_dir():
+                dbpath = Path(argvs.taxInfo)
+            elif Path(argvs.taxInfo).is_file():
+                custom_taxa_tsv = Path(argvs.taxInfo)
 
         taxonomy.loadTaxonomy(dbpath=dbpath,
-                        cus_taxonomy_file=custom_taxa_tsv,
-                        auto_download=False)
+                              cus_taxonomy_file=custom_taxa_tsv,
+                              auto_download=False)
         print_message(f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile)
 
         #load database stats
         print_message("Loading database stats...", argvs.silent, begin_t, logfile)
-        if os.path.isfile(argvs.database + ".stats"):
+        if Path(argvs.database + ".stats").is_file():
             df_stats = load_database_stats(argvs.database+".stats")
         else:
             print_message(f"ERROR: {argvs.database+'.stats'} not found.", argvs.silent, begin_t, logfile, errorout=1)
@@ -698,12 +700,12 @@ def main(args):
     if multi_part_index_flag:
         # remove multiple hits from the SAM file
         print_message("Removing multiple hits from SAM file...", argvs.silent, begin_t, logfile)
-        samfile_output = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
-        samfile_temp = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
+        samfile_output = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
+        samfile_temp = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
         flag, aln_count, top_hits_count = read_mapping.post_processing_sam(samfile, samfile_temp)
         if flag:
-            os.rename(samfile_temp, samfile_output)
-            samfile = samfile_output
+            samfile_temp.rename(samfile)
+            samfile_output.unlink(missing_ok=True)
             # Note:
             # When input of the gottcha2 is a SAM file and new outdir/prefix is provided, the output will be saved to that location.
             # If not, the output will overwrite the original SAM file.
@@ -716,12 +718,12 @@ def main(args):
     if argvs.nanopore and Path(samfile).is_file():
         # remove inconsistent read chunks from the SAM file
         print_message("Removing inconsistent read chunks from SAM file...", argvs.silent, begin_t, logfile)
-        samfile_output = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
-        samfile_temp = f"{argvs.outdir}/{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
+        samfile_output = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
+        samfile_temp = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
         flag, tol_chunks_count, tol_chunks_qualified = ont_utils.split_reads_samfile_postprocessing(samfile, samfile_temp)
         if flag:
-            os.rename(samfile_temp, samfile_output)
-            samfile = samfile_output
+            samfile_temp.rename(samfile)
+            samfile_output.unlink(missing_ok=True)
         print_message(f" - {tol_chunks_count:,} mapped read chunks processed", argvs.silent, begin_t, logfile)
         print_message(f" - {tol_chunks_count-tol_chunks_qualified:,} inconsistent hits removed", argvs.silent, begin_t, logfile)
         gc.collect()
@@ -831,7 +833,7 @@ def main(args):
 
         if argvs.extractOnly:
             # repalce bamfile name to replace from ".gottcha_\w+.bam" to ".full.tsv"
-            full_report_file = re.sub(r"\.gottcha_\w+\.bam$", ".full.tsv", bamfile)
+            full_report_file = re.sub(r"\.gottcha_\w+\.bam$", ".full.tsv", str(bamfile))
 
         taxa_dict, ref_to_extract_taxid = extract_reads.parse_taxids(taxa_arg, 
                                                                      res_df, 
@@ -845,13 +847,12 @@ def main(args):
             print_message("No qualified taxonomy profiled.", argvs.silent, begin_t, logfile)
 
         if not argvs.stdout:
-            outfile = f"{argvs.outdir}/{argvs.prefix}.extract.{out_format.lower()}"
-            out_fp = open(outfile, 'w')
+            outfile = Path(argvs.outdir) / f"{argvs.prefix}.extract.{out_format.lower()}"
 
             _args = (os.path.abspath(bamfile),
                        taxa_dict,
                        ref_to_extract_taxid,
-                       out_fp,
+                       outfile.open("w", encoding="utf-8"),
                        argvs.threads,
                        argvs.matchFraction,
                        argvs.matchIdentity,

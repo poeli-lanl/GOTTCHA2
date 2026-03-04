@@ -1,3 +1,4 @@
+from pathlib import Path
 import re
 import subprocess
 import logging
@@ -7,7 +8,7 @@ import pandas as pd
 import logging
 import pandas as pd
 
-def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, samfile: str, logfile: str) -> Tuple[int, str, str]:
+def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, samfile: Path, logfile: Path) -> Tuple[int, str, str]:
     """
     Map reads to the reference database using minimap2.
 
@@ -21,8 +22,8 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
         threads (int): Number of threads to use
         mm_options (str): Minimap2 options for read mapping
         presetx (str): Minimap2 preset mode ('sr', 'map-pb', or 'map-ont')
-        samfile (str): Output SAM file path
-        logfile (str): Log file path
+        samfile (Path): Output SAM file path
+        logfile (Path): Log file path
         nanopore (bool): Whether to use Nanopore-specific settings
 
     Returns:
@@ -43,19 +44,17 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
     if presetx != 'sr':
         sr_opts = f"-x {presetx} -N20 --secondary=no --sam-hit-only -a"
 
-    bash_cmd   = f"set -o pipefail; set -x;"
     mm2_cmd    = f"minimap2 {sr_opts} -t{threads} {db}.mmi {input_file}"
     filter_cmd = f"sed '/^@/d'"  # filter out header lines
-    cmd        = f"{bash_cmd} {mm2_cmd} | {filter_cmd} > {samfile}"
 
     # proc = subprocess.Popen(cmd, shell=True, executable='/bin/bash', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, universal_newlines=True, bufsize=1)
 
-    with open(samfile, "w") as out_f:
+    with samfile.open("w", encoding="utf-8") as out_f:
         mm2 = subprocess.Popen(
             mm2_cmd,
             shell=True,
             stdout=subprocess.PIPE,      # -> sed
-            stderr=subprocess.PIPE,      # <- you read THIS (minimap2 only)
+            stderr=subprocess.PIPE,      # <- read THIS (minimap2 only)
             text=True,
             bufsize=1,
         )
@@ -72,7 +71,7 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
 
         mm2.stdout.close()  # allow mm2 to get SIGPIPE if sed exits
 
-        with open(logfile, "a") as f:
+        with logfile.open("a", encoding="utf-8") as f:
             # Stream / parse minimap2 stderr
             for line in mm2.stderr:
                 if "For a multi-part index" in line:
@@ -93,7 +92,7 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
     return rc_mm, mm2_cmd, input_read_count, multi_part_index_flag
 
 
-def post_processing_sam(samfile: str, samfile_temp: str) -> bool:
+def post_processing_sam(samfile: Path, samfile_temp: Path) -> bool:
     """
     Removing multiple hits from the SAM file by keeping only the best alignment for each read.
 
@@ -145,7 +144,7 @@ def post_processing_sam(samfile: str, samfile_temp: str) -> bool:
         del idxmax
 
         logging.info(f'Writing top score hits...')
-        with open(samfile_temp, 'w') as fout, open(samfile, 'r') as fin:
+        with samfile_temp.open("w", encoding="utf-8") as fout, samfile.open("r", encoding="utf-8") as fin:
             lines_to_write = []
             for idx, line in enumerate(fin):
                 if idx in idxmax_set:
