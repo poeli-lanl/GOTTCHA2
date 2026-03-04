@@ -700,12 +700,10 @@ def main(args):
     if multi_part_index_flag:
         # remove multiple hits from the SAM file
         print_message("Removing multiple hits from SAM file...", argvs.silent, begin_t, logfile)
-        samfile_output = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
         samfile_temp = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
         flag, aln_count, top_hits_count = read_mapping.post_processing_sam(samfile, samfile_temp)
         if flag:
             samfile_temp.rename(samfile)
-            samfile_output.unlink(missing_ok=True)
             # Note:
             # When input of the gottcha2 is a SAM file and new outdir/prefix is provided, the output will be saved to that location.
             # If not, the output will overwrite the original SAM file.
@@ -718,12 +716,10 @@ def main(args):
     if argvs.nanopore and Path(samfile).is_file():
         # remove inconsistent read chunks from the SAM file
         print_message("Removing inconsistent read chunks from SAM file...", argvs.silent, begin_t, logfile)
-        samfile_output = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
         samfile_temp = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
-        flag, tol_chunks_count, tol_chunks_qualified = ont_utils.split_reads_samfile_postprocessing(samfile, samfile_temp)
-        if flag:
+        tol_chunks_count, tol_chunks_qualified = ont_utils.split_reads_samfile_postprocessing(samfile, samfile_temp)
+        if tol_chunks_count > 0:
             samfile_temp.rename(samfile)
-            samfile_output.unlink(missing_ok=True)
         print_message(f" - {tol_chunks_count:,} mapped read chunks processed", argvs.silent, begin_t, logfile)
         print_message(f" - {tol_chunks_count-tol_chunks_qualified:,} inconsistent hits removed", argvs.silent, begin_t, logfile)
         gc.collect()

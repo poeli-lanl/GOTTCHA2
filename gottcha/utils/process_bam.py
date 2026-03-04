@@ -109,7 +109,6 @@ def _process_chunk(task: Tuple[str, int, int]) -> List:
     min_alen = _CFG["min_alen"]
     split_read_flag = _CFG["split_read_flag"]
 
-    aln_starts_in_chunk_flag = False
     numreads = 0
     readlength = 0
     indels = 0
@@ -132,27 +131,25 @@ def _process_chunk(task: Tuple[str, int, int]) -> List:
         if aln.mapping_quality < min_mapq:
             continue
 
-        if aln.reference_start >= start0:
-            aln_starts_in_chunk_flag = True
-
-        if min_idt > 0.0 and aln.has_tag('NM'):
-            mm_idt = aln.get_tag('NM') / aln.alen
-            if min_idt > (1-mm_idt):
-                if aln_starts_in_chunk_flag: invalid_alns += 1
-                continue
-
-        if min_frac > 0.0:
-            if (aln.alen / aln.query_length) < min_frac and (aln.alen / bam.get_reference_length(rname)) < min_frac:
-                if aln_starts_in_chunk_flag: invalid_alns += 1
-                continue
-
-        if min_alen > 0 and aln.alen < min_alen:
-            if aln_starts_in_chunk_flag: invalid_alns += 1
-            continue
-
         # Note: aln.reference_start is 0-based leftmost coordinate of the alignment on the reference.
         # Only count reads that have their aligned portion starting within the chunk towards numreads, to avoid double-counting reads that span multiple chunks.
-        if aln_starts_in_chunk_flag:
+        if aln.reference_start >= start0:
+
+            if min_idt > 0.0 and aln.has_tag('NM'):
+                mm_idt = (1-aln.get_tag('NM')/aln.alen)
+                if min_idt > mm_idt:
+                    invalid_alns += 1
+                    continue
+
+            if min_frac > 0.0:
+                if (aln.alen / aln.query_length) < min_frac and (aln.alen / bam.get_reference_length(rname)) < min_frac:
+                    invalid_alns += 1
+                    continue
+
+            if min_alen > 0 and aln.alen < min_alen:
+                invalid_alns += 1
+                continue
+
             # If split_read_flag is set, only count reads with ZC tag (the first chunked reads) towards numreads.
             if split_read_flag:
                 if aln.has_tag('ZC'):
@@ -233,13 +230,13 @@ def _process_chunk(task: Tuple[str, int, int]) -> List:
 
     covbases = int(np.count_nonzero(depth))
     mismatches_total = int(mm.sum())
-    mapped_bases = int(depth.sum()) # total aligned bases (including matches and mismatches)
+    mapped_bases = int(depth.sum())+indels # total aligned bases (including matches and mismatches)
 
     # Positions where mismatch fraction > 0.5 among reads with aligned bases
     # i.e. mm / depth > 0.5  ->  2*mm > depth
     consensus_diff = int(np.count_nonzero((depth > 0) & (mm * 2 > depth)))
 
-    logging.debug(f"Processed {rname}: {numreads} reads, {covbases} covbases, {mismatches_total} mismatches, {consensus_diff} consensus_diff, {mapped_bases} mapped_bases, {invalid_alns} invalid_alns")
+    logging.debug(f"Processed {rname}: {numreads} reads, {covbases} covbases, {mismatches_total} mismatches, {consensus_diff} consensus_diff, {indels} indels, {mapped_bases} mapped_bases, {invalid_alns} invalid_alns")
 
     return [rname,
             start0,

@@ -658,6 +658,9 @@ def process_sam_file(sam_fn, numthreads, matchFraction, matchIdentity, matchLeng
             del result[k]['REGIONS']
             mapped_reads += result[k]["MR"]
 
+    for k in result:
+        logging.debug(f'Processed {k}: {result[k]["MR"]} reads, {result[k]["SC"]} covbases, {result[k]["NM"]} mismatches, {result[k]["MB"]} mapped_bases, {result[k]["ID"]} indels, {result[k]["RL"]} read_length')
+
     return result, mapped_reads, tol_alignment_count, tol_invalid_match_count
 
 def extract_sequences_by_taxonomy(sam_fn,

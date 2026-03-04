@@ -184,7 +184,7 @@ def split_reads_samfile_postprocessing(samfile, samfile_temp):
         samfile_temp (str): Path to the output cleaned SAM file
 
     Returns:
-        bool: True if successful
+        tuple: Total chunks and qualified hits counts
     """
     total_chunks = 0
 
@@ -237,7 +237,7 @@ def split_reads_samfile_postprocessing(samfile, samfile_temp):
 
     logging.info(f'Done writing {len(idxmax_set)} hits.')
 
-    return True, total_chunks, len(idxmax_set)
+    return total_chunks, len(idxmax_set)
 
 
 def main():
