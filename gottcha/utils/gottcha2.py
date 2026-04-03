@@ -23,7 +23,7 @@ try:
 except ImportError:
     # Fall back to direct import (for script usage)
     import taxonomy
-    import gottcha.utils.ont_utils as ont_utils
+    import ont_utils
 
 def parse_args(ver, args):
     """
@@ -70,7 +70,7 @@ def parse_args(ver, args):
     p.add_argument( '-np','--nanopore', action="store_true",
                     help="Indicate that the input reads are from Oxford Nanopore sequencing platform. This option enables read splitting and error rate set to 0.03 if not specified.")
 
-    p.add_argument('-e', '--extract', metavar='TAXON[,TAXON2,...]', type=str, default=None,
+    p.add_argument( '-e', '--extract', metavar='TAXON[,TAXON2,...]', type=str, default=None,
                     help=(
                         "Extract mapped reads for specific taxa to a FASTA or FASTQ file.\n"
                         "You can specify taxa in one of the following ways:\n"
