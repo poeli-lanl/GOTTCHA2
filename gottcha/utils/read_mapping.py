@@ -8,7 +8,7 @@ import pandas as pd
 import logging
 import pandas as pd
 
-def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, samfile: Path, logfile: Path) -> Tuple[int, str, str]:
+def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, samfile: Path, logfile: Path) -> Tuple[int, str, int, bool]:
     """
     Map reads to the reference database using minimap2.
 
@@ -27,10 +27,11 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
         nanopore (bool): Whether to use Nanopore-specific settings
 
     Returns:
-        Tuple[int, str, str]: (
+        Tuple[int, str, int, bool]: (
             exitcode (int): Exit code from the mapping process,
             cmd (str): Command that was executed,
-            errs (str): Error output from the command
+            input_read_count (int): Number of input reads,
+            multi_part_index_flag (bool): Flag indicating if a multi-part index was used
         )
     """
     input_file = " ".join(reads)
@@ -92,7 +93,7 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
     return rc_mm, mm2_cmd, input_read_count, multi_part_index_flag
 
 
-def post_processing_sam(samfile: Path, samfile_temp: Path) -> bool:
+def post_processing_sam(samfile: Path, samfile_temp: Path) -> Tuple[bool, int, int]:
     """
     Removing multiple hits from the SAM file by keeping only the best alignment for each read.
 
@@ -101,7 +102,11 @@ def post_processing_sam(samfile: Path, samfile_temp: Path) -> bool:
         samfile_temp (str): Path to the temporary SAM file with only the best alignments
 
     Returns:
-        bool: False if no multiple hits were found, True if multiple hits were removed
+        Tuple[bool, int, int]: (
+            multiple_hits_removed (bool): False if no multiple hits were found, True if multiple hits were removed,
+            total_alignments (int): Total number of alignments in the SAM file,
+            top_score_hits (int): Number of top score hits after filtering
+        )
     """
     logging.info(f'Loading the SAM file...')
 
