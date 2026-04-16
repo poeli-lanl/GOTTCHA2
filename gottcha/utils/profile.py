@@ -733,6 +733,7 @@ def main(args):
             sylph_query_tsv = Path(argvs.outdir) / f"{argvs.prefix}.sylph_query.tsv"
             queried_signatures_file = Path(argvs.outdir) / f"{argvs.prefix}.sylph_queried_signatures.txt"
             extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.gz"
+            argvs.m2options += " -w24 -k28" # use smaller k-mer and minimizer length for better sensitivity in the fast query; these values are based on testing and benchmarking, but can be further optimized in the future
 
             try:
                 sylph_result = quant.run_sylph_query(
