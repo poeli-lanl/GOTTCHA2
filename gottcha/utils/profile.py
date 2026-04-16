@@ -20,6 +20,8 @@ try:
     import read_mapping
     import aggregate_results
     import extract_reads
+    import quant
+    import sig_archive
     from gottcha2 import __version__
 except ImportError:
     # Fall back to direct import (for script usage)
@@ -31,6 +33,8 @@ except ImportError:
     import gottcha.utils.aggregate_results as aggregate_results
     import gottcha.utils.read_mapping as read_mapping
     import gottcha.utils.extract_reads as extract_reads
+    import gottcha.utils.quant as quant
+    import gottcha.utils.sig_archive as sig_archive
     from gottcha.gottcha2 import __version__
 
 def parse_args(ver, args):
@@ -163,6 +167,9 @@ def parse_args(ver, args):
     p.add_argument('-c','--stdout', action="store_true",
                     help="Write on standard output.")
 
+    p.add_argument('--fast', action="store_true",
+                    help="Fast mode")
+
     p.add_argument('--mpa', action="store_true",
                     help="Generate output in MetaPhlAn format.")
 
@@ -202,21 +209,24 @@ def parse_args(ver, args):
     # Auto-detect database path and prefix, and check the existence of input files and database index
     if args_parsed.database:
         #assign default path for database name
+        db_extfn = "syldb" if args_parsed.fast else "mmi"
+
         if Path(args_parsed.database).is_dir():
-            dbs = list(Path(args_parsed.database).glob("*.mmi"))
+            dbs = list(Path(args_parsed.database).glob(f"*.{db_extfn}"))
             if len(dbs) > 1:
-                p.error(f'Multiple .mmi files found in {args_parsed.database}. Please specify one with database prefix.')
+                p.error(f'Multiple .{db_extfn} files found in {args_parsed.database}. Please specify one with database prefix.')
             elif len(dbs) == 0:
-                p.error(f'No .mmi file found in {args_parsed.database}. Please specify the database prefix or the path to the .mmi file.')
+                p.error(f'No .{db_extfn} file found in {args_parsed.database}. Please specify the database prefix or the path to the .{db_extfn} file.')
             else:
                 args_parsed.database = str(dbs[0])
 
-        if args_parsed.database.endswith(".mmi"):
-            args_parsed.database = args_parsed.database.replace('.mmi','')
+        if args_parsed.database.endswith(f'.{db_extfn}'):
+            args_parsed.database = args_parsed.database.replace(f'.{db_extfn}', '')
 
+        # Only check the existence of the database index file if input reads are provided
         if args_parsed.input:
-            if not Path(args_parsed.database + ".mmi").is_file():
-                p.error('Database index %s.mmi not found.' % args_parsed.database)
+            if not Path(f'{args_parsed.database}.{db_extfn}').is_file():
+                p.error(f'Database index {args_parsed.database}.{db_extfn} not found.')
 
     if args_parsed.input:
         for path in args_parsed.input:
@@ -542,6 +552,8 @@ def main(args):
 
     dependency_check("minimap2")
     dependency_check("samtools")
+    if argvs.fast:
+        dependency_check("sylph")
 
     #prepare output object
     argvs.relAbu = argvs.relAbu.upper()
@@ -675,7 +687,36 @@ def main(args):
         acc_list = load_acc_list(argvs.accList)
         print_message(f" - {len(acc_list):,} accession/signature of interest loaded.", argvs.silent, begin_t, logfile)
 
-    #main process
+    # Summary of the Main Process:
+    #
+    # Input Reads
+    #     ↓
+    # [Nanopore Preprocessing] (optional)
+    #     ↓
+    # [Run fast query] (sylph; optionall; if fast mode is on)
+    #     ↓
+    # [Extract queried signatures] (optionall; if fast mode is on)
+    #     ↓
+    # Read Mapping (minimap2)
+    #     ↓
+    # Alignments (SAM File)
+    #     ↓
+    # [Remove Multiple Hits] (if multi-part index)
+    #     ↓
+    # [Remove Inconsistent Chunks] (if nanopore)
+    #     ↓
+    # BAM Conversion + Indexing
+    #     ↓
+    # Parse & Filter Alignments
+    #     ↓
+    # Group to Strains
+    #     ↓
+    # Aggregate Taxonomy
+    #     ↓
+    # Generate Reports
+    #     ↓
+    # [Extract Reads] (optional)
+
     if argvs.input:
         # if nanopore option is on, preprocessing reads
         if argvs.nanopore:
@@ -683,8 +724,69 @@ def main(args):
             argvs.input = ont_utils.preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
             split_read_flag = True
 
+        minimap2_index = "" if argvs.fast else f"{argvs.database}.mmi"
+
+        if argvs.fast:
+            print_message("Running fast query...", argvs.silent, begin_t, logfile)
+            sylph_db = f"{argvs.database}.syldb"
+            g2_archive = f"{argvs.database}.zip"
+            sylph_query_tsv = Path(argvs.outdir) / f"{argvs.prefix}.sylph_query.tsv"
+            queried_signatures_file = Path(argvs.outdir) / f"{argvs.prefix}.sylph_queried_signatures.txt"
+            extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.gz"
+
+            try:
+                sylph_result = quant.run_sylph_query(
+                    database=sylph_db,
+                    reads=argvs.input,
+                    output=str(sylph_query_tsv),
+                    threads=argvs.threads,
+                )
+            except (FileNotFoundError, subprocess.CalledProcessError) as e:
+                print_message(f"ERROR: fast query failed: {e}", argvs.silent, begin_t, logfile, errorout=1)
+
+            with logfile.open("a", encoding="utf-8") as f:
+                if sylph_result.stdout:
+                    f.write(sylph_result.stdout)
+                if sylph_result.stderr:
+                    f.write(sylph_result.stderr)
+
+            try:
+                pd.read_csv(sylph_query_tsv, 
+                            sep='\t', 
+                            usecols=['Genome_file'], 
+                            dtype={'Genome_file': str})['Genome_file'].dropna().str.strip().to_csv(queried_signatures_file, index=False, header=False)
+            except pd.errors.EmptyDataError:
+                queried_signatures = pd.Series(dtype=str)
+            except (FileNotFoundError, ValueError) as e:
+                print_message(f"ERROR: unable to parse Sylph query output {sylph_query_tsv}: {e}", argvs.silent, begin_t, logfile, errorout=1)
+
+            filenames = sig_archive.read_file_list(queried_signatures_file,
+                                                   filename_only=True)
+            print_message(f" - {len(filenames):,} queried signatures of genomes saved.", argvs.silent, begin_t, logfile)
+            
+            extracted_content, processed_files, skipped_files = sig_archive.quick_concat(g2_archive,
+                                                                                         separator=str('\n').encode('utf-8'),
+                                                                                         skip_missing=False, 
+                                                                                         filenames=filenames)
+
+            extracted_reference.write_bytes(extracted_content)
+            if extracted_reference.stat().st_size == 0:
+                print_message(
+                    f"ERROR: no queried signatures could be extracted from {sylph_db}; {extracted_reference} is empty.",
+                    argvs.silent,
+                    begin_t,
+                    logfile,
+                    errorout=1
+                )
+
+            if skipped_files:
+                print_message(f" - {len(skipped_files):,} queried signatures were not found in the archive.", argvs.silent, begin_t, logfile)
+            print_message(f" - {len(processed_files):,} reference genomes extracted.", argvs.silent, begin_t, logfile)
+            minimap2_index = str(extracted_reference)
+
+
         print_message("Running read-mapping...", argvs.silent, begin_t, logfile)
-        exitcode, cmd, input_read_count, multi_part_index_flag = read_mapping.minimap2(argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
+        exitcode, cmd, input_read_count, multi_part_index_flag = read_mapping.minimap2(argvs.input, minimap2_index, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
         logging.info(f"COMMAND: {cmd}")
 
         if exitcode != 0:

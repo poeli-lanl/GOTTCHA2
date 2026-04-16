@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__   = "2.3.1"
+__version__   = "2.4.0"
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", 
                  "Anna Chernikov", 
