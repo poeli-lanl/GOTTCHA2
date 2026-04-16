@@ -612,46 +612,46 @@ def main(args):
 
     print_message(f"GOTTCHA (v{__version__})", argvs.silent, begin_t, logfile)
     print_message(f"Arguments and dependencies checked:", argvs.silent, begin_t, logfile)
-    print_message(f"    Database           : {argvs.database}",    argvs.silent, begin_t, logfile)
-    print_message(f"    Database level     : {argvs.dbLevel}",     argvs.silent, begin_t, logfile)
-    print_message(f"    Abundance          : {argvs.relAbu}",      argvs.silent, begin_t, logfile)
-    print_message(f"    Output directory   : {argvs.outdir}",      argvs.silent, begin_t, logfile)
-    print_message(f"    Output prefix      : {argvs.prefix}",      argvs.silent, begin_t, logfile)
-    print_message(f"    Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile)
+    print_message(f" - Database           : {argvs.database}",    argvs.silent, begin_t, logfile)
+    print_message(f" - Database level     : {argvs.dbLevel}",     argvs.silent, begin_t, logfile)
+    print_message(f" - Abundance          : {argvs.relAbu}",      argvs.silent, begin_t, logfile)
+    print_message(f" - Output directory   : {argvs.outdir}",      argvs.silent, begin_t, logfile)
+    print_message(f" - Output prefix      : {argvs.prefix}",      argvs.silent, begin_t, logfile)
+    print_message(f" - Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile)
     if argvs.input:
-        print_message(f"    Input Reads        : {argvs.input}",     argvs.silent, begin_t, logfile)
+        print_message(f" - Input Reads        : {argvs.input}",     argvs.silent, begin_t, logfile)
     if argvs.bam:
-        print_message(f"    Input BAM File     : {bamfile}",           argvs.silent, begin_t, logfile)
+        print_message(f" - Input BAM File     : {bamfile}",           argvs.silent, begin_t, logfile)
     if argvs.nanopore:
-        print_message(f"    Nanopore Mode      : Enabled",              argvs.silent, begin_t, logfile)
+        print_message(f" - Nanopore Mode      : Enabled",              argvs.silent, begin_t, logfile)
     if argvs.errorRate:
-        print_message(f"    Read Error Rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile)
+        print_message(f" - Read Error Rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile)
     if argvs.accList:
-        print_message(f"    AOI List           : {argvs.accList}", argvs.silent, begin_t, logfile)
+        print_message(f" - AOI List           : {argvs.accList}", argvs.silent, begin_t, logfile)
     if argvs.accList:
-        print_message(f"    AOI Reads Action   : {argvs.accListAction}", argvs.silent, begin_t, logfile)
+        print_message(f" - AOI Reads Action   : {argvs.accListAction}", argvs.silent, begin_t, logfile)
     if argvs.minCov > 0:
-        print_message(f"    Minimal SIG Cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile)
+        print_message(f" - Minimal SIG Cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile)
     if argvs.minLen > 0:
-        print_message(f"    Minimal SIG Length : {argvs.minLen}",      argvs.silent, begin_t, logfile)
+        print_message(f" - Minimal SIG Length : {argvs.minLen}",      argvs.silent, begin_t, logfile)
     if argvs.minReads > 0:
-        print_message(f"    Minimal Reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile)
+        print_message(f" - Minimal Reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile)
     if argvs.extract:
-        print_message(f"    Extract Taxa       : {argvs.extract}",     argvs.silent, begin_t, logfile)
+        print_message(f" - Extract Taxa       : {argvs.extract}",     argvs.silent, begin_t, logfile)
     if argvs.extractOnly:
-        print_message(f"    Extract Only       : {argvs.extractOnly}", argvs.silent, begin_t, logfile)
+        print_message(f" - Extract Only       : {argvs.extractOnly}", argvs.silent, begin_t, logfile)
     if argvs.maxZscore > 0:
-        print_message(f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile)
+        print_message(f" - Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile)
     if logfile_prev:
-        print_message(f"    Load criteria from : {logfile_prev}",      argvs.silent, begin_t, logfile)
+        print_message(f" - Load criteria from : {logfile_prev}",      argvs.silent, begin_t, logfile)
     if argvs.matchIdentity != None:
-        print_message(f"    Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile)
+        print_message(f" - Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile)
     if argvs.matchFraction != None:
-        print_message(f"    Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile)
+        print_message(f" - Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile)
     if argvs.matchLength != None:
-        print_message(f"    Min Match Length   : {argvs.matchLength}", argvs.silent, begin_t, logfile)
+        print_message(f" - Min Match Length   : {argvs.matchLength}", argvs.silent, begin_t, logfile)
     if argvs.sniScore != None:
-        print_message(f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile)
+        print_message(f" - SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile)
 
     #load taxonomy for taxonomic aggregation and annotation
     if not argvs.extractOnly:
