@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 __version__   = "2.4.0"
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
-__credits__   = ["Po-E Li", 
-                 "Anna Chernikov", 
-                 "Jason Gans", 
-                 "Tracey Freites", 
-                 "Patrick Chain"]
+__credits__   = ["Po-E Li", "Anna Chernikov"]
 try:
     from .utils import profile
     from .utils import gottcha2

@@ -542,7 +542,7 @@ def main(args):
 
     logging.basicConfig(
         level=logging_level,
-        format='%(asctime)s [%(levelname)s] [%(module)s] %(message)s',
+        format='[%(asctime)s] [%(levelname)s] [%(module)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M',
    )
 
@@ -733,14 +733,17 @@ def main(args):
             sylph_query_tsv = Path(argvs.outdir) / f"{argvs.prefix}.sylph_query.tsv"
             queried_signatures_file = Path(argvs.outdir) / f"{argvs.prefix}.sylph_queried_signatures.txt"
             extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.gz"
-            argvs.m2options += " -w24 -k28" # use smaller k-mer and minimizer length for better sensitivity in the fast query; these values are based on testing and benchmarking, but can be further optimized in the future
+            argvs.m2options += " -w12 -k24" # use smaller k-mer and minimizer length for better sensitivity in the fast query; these values are based on testing and benchmarking, but can be further optimized in the future
 
+            # Run Sylph query to get the list of signatures that are likely present in the input reads
             try:
                 sylph_result = quant.run_sylph_query(
                     database=sylph_db,
                     reads=argvs.input,
                     output=str(sylph_query_tsv),
                     threads=argvs.threads,
+                    minimum_kmer=50,
+                    read_seq_id=float(100-argvs.errorRate*100)
                 )
             except (FileNotFoundError, subprocess.CalledProcessError) as e:
                 print_message(f"ERROR: fast query failed: {e}", argvs.silent, begin_t, logfile, errorout=1)
@@ -761,10 +764,10 @@ def main(args):
             except (FileNotFoundError, ValueError) as e:
                 print_message(f"ERROR: unable to parse Sylph query output {sylph_query_tsv}: {e}", argvs.silent, begin_t, logfile, errorout=1)
 
-            filenames = sig_archive.read_file_list(queried_signatures_file,
-                                                   filename_only=True)
-            print_message(f" - {len(filenames):,} queried signatures of genomes saved.", argvs.silent, begin_t, logfile)
+            filenames = sig_archive.read_file_list(queried_signatures_file, filename_only=True)
+            print_message(f" - Identified {len(filenames):,} signatures of genomes.", argvs.silent, begin_t, logfile)
             
+            # Extract those signatures from the archive to create a smaller reference for read mapping
             extracted_content, processed_files, skipped_files = sig_archive.quick_concat(g2_archive,
                                                                                          separator=str('\n').encode('utf-8'),
                                                                                          skip_missing=False, 
@@ -784,7 +787,6 @@ def main(args):
                 print_message(f" - {len(skipped_files):,} queried signatures were not found in the archive.", argvs.silent, begin_t, logfile)
             print_message(f" - {len(processed_files):,} reference genomes extracted.", argvs.silent, begin_t, logfile)
             minimap2_index = str(extracted_reference)
-
 
         print_message("Running read-mapping...", argvs.silent, begin_t, logfile)
         exitcode, cmd, input_read_count, multi_part_index_flag = read_mapping.minimap2(argvs.input, minimap2_index, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
@@ -832,9 +834,9 @@ def main(args):
         if os.path.isfile(os.path.abspath(samfile)):
             print_message("Converting to BAM file...", argvs.silent, begin_t, logfile)
             sam_to_bam.convert_sam_to_bam(input_sam=os.path.abspath(samfile),
-                                                  output_bam=os.path.abspath(bamfile),
-                                                  threads=argvs.threads,
-                                                  quiet=argvs.silent)
+                                          output_bam=os.path.abspath(bamfile),
+                                          threads=argvs.threads,
+                                          quiet=argvs.silent)
             print_message(f"BAM file saved to {bamfile}...", argvs.silent, begin_t, logfile)
             
             file_path = Path(samfile)
@@ -845,11 +847,11 @@ def main(args):
         if Path(bamfile).exists() and Path(f"{bamfile}.bai").exists():
             print_message("Processing alignments...", argvs.silent, begin_t, logfile)
             ref_chunk_results = process_bam.parse_aln_from_bam(bam_path=bamfile,
-                                                             processes=argvs.threads,
-                                                             min_frac=argvs.matchFraction,
-                                                             min_idt=argvs.matchIdentity,
-                                                             min_alen=argvs.matchLength,
-                                                             split_read_flag=split_read_flag)
+                                                               processes=argvs.threads,
+                                                               min_frac=argvs.matchFraction,
+                                                               min_idt=argvs.matchIdentity,
+                                                               min_alen=argvs.matchLength,
+                                                               split_read_flag=split_read_flag)
 
             str_df, aoi_read_count = aggregate_results.group_refs_to_strains(ref_chunk_results, acc_list, argvs.accListAction, df_stats)
 
