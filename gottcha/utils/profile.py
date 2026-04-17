@@ -543,7 +543,7 @@ def main(args):
     logging.basicConfig(
         level=logging_level,
         format='[%(asctime)s] [%(levelname)s] [%(module)s] %(message)s',
-        datefmt='%Y-%m-%d %H:%M',
+        datefmt='%Y%m%d %H:%M:%S',
    )
 
     #dependency check
