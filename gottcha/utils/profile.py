@@ -170,6 +170,9 @@ def parse_args(ver, args):
     p.add_argument('--fast', action="store_true",
                     help="Fast mode")
 
+    p.add_argument('--fast-min-kmer', type=int, default=None,
+                    help="Minimum k-mer size for fast mode. [default: None]")
+
     p.add_argument('--mpa', action="store_true",
                     help="Generate output in MetaPhlAn format.")
 
@@ -734,6 +737,10 @@ def main(args):
             queried_signatures_file = Path(argvs.outdir) / f"{argvs.prefix}.sylph_queried_signatures.txt"
             extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.gz"
             argvs.m2options += " -w12 -k24" # use smaller k-mer and minimizer length for better sensitivity in the fast query; these values are based on testing and benchmarking, but can be further optimized in the future
+            
+            fast_min_kmer = 50
+            if argvs.fast_min_kmer is not None:
+                fast_min_kmer = argvs.fast_min_kmer
 
             # Run Sylph query to get the list of signatures that are likely present in the input reads
             try:
@@ -742,7 +749,7 @@ def main(args):
                     reads=argvs.input,
                     output=str(sylph_query_tsv),
                     threads=argvs.threads,
-                    minimum_kmer=50,
+                    minimum_kmer=fast_min_kmer,
                     read_seq_id=float(100-argvs.errorRate*100)
                 )
             except (FileNotFoundError, subprocess.CalledProcessError) as e:
