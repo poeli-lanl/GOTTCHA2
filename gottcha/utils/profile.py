@@ -75,9 +75,6 @@ def parse_args(ver, args):
                     choices=['superkingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species', 'strain'],
                     help="""Specify the taxonomic level of the input database. You can choose one rank from "superkingdom", "phylum", "class", "order", "family", "genus", "species" and "strain". The value will be auto-detected if the input database ended with levels (e.g. GOTTCHA_db.species).""")
 
-    p.add_argument('-ti','--taxInfo', metavar='[PATH]', type=str, default='',
-                    help="""Specify the path to the taxonomy information directory or file. The program will attempt to locate a matching .tax.tsv file for the specified database. If it cannot find one, it will use the ‘taxonomy_db’ directory located in the same directory as the executable by default.""")
-
     p.add_argument('-np','--nanopore', action="store_true",
                     help="""Indicate that the input reads are sequenced from Oxford Nanopore (ONT) sequencing platform. This option enables read preprocessing and set "-er 0.03 -mi 0.9 -mf 0.9 -ml 100" by default.""")
 
@@ -230,6 +227,27 @@ def parse_args(ver, args):
         if args_parsed.input:
             if not Path(f'{args_parsed.database}.{db_extfn}').is_file():
                 p.error(f'Database index {args_parsed.database}.{db_extfn} not found.')
+
+        if argvs.fast:
+            if not Path(f'{args_parsed.database}.{db_extfn}').is_file():
+                p.error(f'Database index {args_parsed.database}.{db_extfn} not found.')
+            if not Path(f'{args_parsed.database}.zip').is_file():
+                p.error(f'Database file {args_parsed.database}.zip not found.')
+
+        # check the existence of the taxonomic information file for the specified database
+        if args_parsed.taxInfo:
+            tax_info_path = Path(args_parsed.taxInfo)
+            if tax_info_path.is_dir():
+                tax_info_files = list(tax_info_path.glob(f"{Path(args_parsed.database).name}*.tax.tsv"))
+                if len(tax_info_files) > 1:
+                    p.error(f'Multiple tax info files found in {args_parsed.taxInfo} for the specified database. Please specify the exact file path with --taxInfo.')
+                elif len(tax_info_files) == 0:
+                    p.error(f'No tax info file found in {args_parsed.taxInfo} for the specified database. Please specify the exact file path with --taxInfo.')
+                else:
+                    args_parsed.taxInfo = str(tax_info_files[0])
+            elif not tax_info_path.is_file():
+                p.error(f'Tax info file {args_parsed.taxInfo} not found.')
+
 
     if args_parsed.input:
         for path in args_parsed.input:
@@ -738,9 +756,13 @@ def main(args):
             extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.gz"
             argvs.m2options += " -w12 -k24" # use smaller k-mer and minimizer length for better sensitivity in the fast query; these values are based on testing and benchmarking, but can be further optimized in the future
             
-            fast_min_kmer = 50
-            if argvs.fast_min_kmer is not None:
-                fast_min_kmer = argvs.fast_min_kmer
+            # extract subsample (cXXX) rate from sylph_db string, default set to 100
+            subsampling_rate = 100
+            match = re.search(r'c(\d+)', sylph_db)
+            if match:
+                subsampling_rate = int(match.group(1))
+
+            fast_min_kmer = argvs.fast_min_kmer if argvs.fast_min_kmer else 50
 
             # Run Sylph query to get the list of signatures that are likely present in the input reads
             try:
@@ -749,6 +771,7 @@ def main(args):
                     reads=argvs.input,
                     output=str(sylph_query_tsv),
                     threads=argvs.threads,
+                    subsampling_rate=subsampling_rate,
                     minimum_kmer=fast_min_kmer,
                     read_seq_id=float(100-argvs.errorRate*100)
                 )
