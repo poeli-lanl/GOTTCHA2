@@ -27,32 +27,26 @@ jobs:
         python-version: ["3.9", "3.11"]
     defaults:
       run:
-        shell: bash
+        shell: bash -el {0}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Conda environment
+        uses: conda-incubator/setup-miniconda@v3
         with:
+          miniforge-version: latest
+          use-mamba: true
+          activate-environment: gottcha2
+          environment-file: environment.yml
           python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            setup.py
-
-      - name: Install external dependencies
-        run: |
-          set -euxo pipefail
-          sudo apt-get update
-          sudo apt-get install -y minimap2 samtools
 
       - name: Installation
         run: |
           set -euxo pipefail
           python -m pip install --upgrade pip
-          python -m pip install .
+          python -m pip install --no-deps .
           gottcha2 profile --help
 
       - name: Prepare testing dataset
