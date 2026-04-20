@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse as ap
+from asyncio import threads
 import re
 import sys, os, time, subprocess
 import pandas as pd
@@ -632,6 +633,7 @@ def main(args):
     print_message(f" - Output directory   : {argvs.outdir}",      argvs.silent, begin_t, logfile)
     print_message(f" - Output prefix      : {argvs.prefix}",      argvs.silent, begin_t, logfile)
     print_message(f" - Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile)
+    print_message(f" - Fast mode          : {argvs.fast}",        argvs.silent, begin_t, logfile)
     if argvs.input:
         print_message(f" - Input Reads        : {argvs.input}",     argvs.silent, begin_t, logfile)
     if argvs.bam:
@@ -676,8 +678,7 @@ def main(args):
         elif Path(argvs.database + ".taxa").exists():
             custom_taxa_tsv = Path(argvs.database + ".taxa")
 
-        taxonomy.loadTaxonomy(cus_taxonomy_file=custom_taxa_tsv,
-                              auto_download=False)
+        taxonomy.loadTaxonomy(cus_taxonomy_file=custom_taxa_tsv, auto_download=False)
         print_message(f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile)
 
         #load database stats
@@ -732,30 +733,54 @@ def main(args):
             argvs.input = ont_utils.preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
             split_read_flag = True
 
+        # if fast mode is on, run Sylph query to prefilter the reference genomes and create a smaller reference for read mapping; 
+        # otherwise, use the full database index for read mapping
         minimap2_index = "" if argvs.fast else f"{argvs.database}.mmi"
 
         if argvs.fast:
-            print_message("Running fast query...", argvs.silent, begin_t, logfile)
+            print_message("Prefiltering reference genomes...", argvs.silent, begin_t, logfile)
             sylph_db = f"{argvs.database}.syldb"
             g2_archive = f"{argvs.database}.zip"
             sylph_query_tsv = Path(argvs.outdir) / f"{argvs.prefix}.sylph_query.tsv"
             queried_signatures_file = Path(argvs.outdir) / f"{argvs.prefix}.sylph_queried_signatures.txt"
             extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.gz"
-            argvs.m2options += " -w12 -k24" # use smaller k-mer and minimizer length for better sensitivity in the fast query; these values are based on testing and benchmarking, but can be further optimized in the future
+            argvs.m2options += " -w12 -k24" # use smaller k-mer and minimizer length for better sensitivity in the prefiltering query; these values are based on testing and benchmarking, but can be further optimized in the future
+            sylph_intput = argvs.input
             
             # extract subsample (cXXX) rate from sylph_db string, default set to 100
             subsampling_rate = 100
-            match = re.search(r'c(\d+)', sylph_db)
+            match = re.search(r'c(\d+)\.', sylph_db)
             if match:
                 subsampling_rate = int(match.group(1))
 
             fast_min_kmer = argvs.fast_min_kmer if argvs.fast_min_kmer else 50
 
+            # Run Sylph sketch if the input file is in FASTA format
+            if Path(argvs.input[0]).name.endswith(('.fa', '.fasta', '.fa.gz', '.fna', '.fna.gz', '.fasta.gz')):
+                print_message("Generating sketchs for FASTA input reads...", argvs.silent, begin_t, logfile)
+                try:
+                    sylph_result = quant.run_sylph_sketch(
+                        read_file=argvs.input[0],
+                        outdir=str(argvs.outdir),
+                        threads=argvs.threads,
+                        subsampling_rate=subsampling_rate,
+                    )
+                except (FileNotFoundError, subprocess.CalledProcessError) as e:
+                    print_message(f"ERROR: prefiltering failed: {e}", argvs.silent, begin_t, logfile, errorout=1)
+
+                with logfile.open("a", encoding="utf-8") as f:
+                    if sylph_result.stdout:
+                        f.write(sylph_result.stdout)
+                    if sylph_result.stderr:
+                        f.write(sylph_result.stderr)
+                
+                sylph_intput = [str(Path(argvs.outdir) / f"{Path(argvs.input[0]).name}.sylsp")]
+
             # Run Sylph query to get the list of signatures that are likely present in the input reads
             try:
                 sylph_result = quant.run_sylph_query(
                     database=sylph_db,
-                    reads=argvs.input,
+                    reads=sylph_intput,
                     output=str(sylph_query_tsv),
                     threads=argvs.threads,
                     subsampling_rate=subsampling_rate,
@@ -763,7 +788,7 @@ def main(args):
                     read_seq_id=float(100-argvs.errorRate*100)
                 )
             except (FileNotFoundError, subprocess.CalledProcessError) as e:
-                print_message(f"ERROR: fast query failed: {e}", argvs.silent, begin_t, logfile, errorout=1)
+                print_message(f"ERROR: prefiltering failed: {e}", argvs.silent, begin_t, logfile, errorout=1)
 
             with logfile.open("a", encoding="utf-8") as f:
                 if sylph_result.stdout:

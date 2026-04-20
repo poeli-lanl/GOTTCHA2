@@ -462,34 +462,34 @@ def parse_arguments():
         epilog="""
 Examples:
   # Archive multiple genome files
-  python file_archive.py -o genomes.zip genome1.fasta genome2.fasta genome3.fasta
+  python sig_archive.py -o genomes.zip genome1.fasta genome2.fasta genome3.fasta
   
   # Archive all FASTA files from a directory
-  python file_archive.py -o genomes.zip -d /path/to/genomes -p "*.fasta"
+  python sig_archive.py -o genomes.zip -d /path/to/genomes -p "*.fasta"
   
   # Archive files from a list
-  python file_archive.py -o genomes.zip -l genome_list.txt
+  python sig_archive.py -o genomes.zip -l genome_list.txt
   
   # Archive with preserved directory structure
-  python file_archive.py -o genomes.zip -d /data/genomes --preserve
+  python sig_archive.py -o genomes.zip -d /data/genomes --preserve
   
   # List files in an archive
-  python file_archive.py -i genomes.zip --list
+  python sig_archive.py -i genomes.zip --list
   
   # Extract files from an archive
-  python file_archive.py -i genomes.zip --extract extracted/
+  python sig_archive.py -i genomes.zip --extract extracted/
   
   # Concatenate specific files (skip missing files by default)
-  python file_archive.py -i genomes.zip --concat genome1.fasta genome2.fasta -c output.fasta
+  python sig_archive.py -i genomes.zip --concat genome1.fasta genome2.fasta -c output.fasta
   
   # Concatenate files from a list
-  python file_archive.py -i genomes.zip --concat-list files_to_concat.txt -c output.fasta
+  python sig_archive.py -i genomes.zip --concat-list files_to_concat.txt -c output.fasta
   
   # Concatenate with separator
-  python file_archive.py -i genomes.zip --concat-list files.txt -c output.fasta --separator "\\n---\\n"
+  python sig_archive.py -i genomes.zip --concat-list files.txt -c output.fasta --separator "\\n---\\n"
   
   # Fail on missing files instead of skipping
-  python file_archive.py -i genomes.zip --concat-list files.txt -c output.fasta --strict
+  python sig_archive.py -i genomes.zip --concat-list files.txt -c output.fasta --strict
         """
     )
     

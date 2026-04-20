@@ -36,6 +36,8 @@ Commands:
 Examples:
     gottcha2 profile -i reads.fastq -d database/db_prefix
 
+    gottcha2 profile-fast -i reads.fastq -d database/db_prefix
+
     gottcha2 extract -d prefix.bam -d database/db_prefix -e 666
 
     gottcha2 sam2bam -i prefix.sam -o prefix.bam
@@ -50,6 +52,9 @@ def cli():
     if len(args) < 1:
         usage()
     elif args[0] == "profile":
+        profile.main(args)
+    elif args[0] == "fast-profile":
+        args.append("--fast")
         profile.main(args)
     elif args[0] == "download":
         download.main(args[1:])

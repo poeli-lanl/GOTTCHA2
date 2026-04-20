@@ -13,6 +13,66 @@ from typing import List, Optional, Union
 import logging
 
 
+def run_sylph_sketch(
+    read_file: str,
+    outdir: str,
+    threads: int = 1,
+    subsampling_rate: int = 100,
+    additional_args: Optional[List[str]] = None
+) -> subprocess.CompletedProcess:
+    """
+    Run sylph sketch command.
+    
+    Args:
+        database: Path to the sylph database
+        read: Path to read file
+        output: Output file path
+        threads: Number of threads to use (default: 1)
+        subsampling_rate: Subsampling rate (default: 100)
+        additional_args: Additional arguments to pass to sylph sketch
+    
+    Returns:
+        CompletedProcess object containing result information
+    
+    Raises:
+        FileNotFoundError: If database or read file don't exist
+        subprocess.CalledProcessError: If sylph sketch fails
+    """
+    # Handle read as single string
+    if not Path(read_file).exists():
+        raise FileNotFoundError(f"Reads file not found: {read_file}")
+    
+    # Build command
+    cmd = [
+        "sylph", "sketch",
+        "-t", str(threads),
+        "-c", str(subsampling_rate),
+        "-d", str(outdir),
+        "-r", str(read_file),
+    ]
+    
+    # Add additional arguments if provided
+    if additional_args:
+        cmd.extend(additional_args)
+    
+    logging.info(f"COMMAND: {' '.join(cmd)}")
+    
+    # Run command
+    try:
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        return result
+    except subprocess.CalledProcessError as e:
+        logging.info(f"Error running sylph sketch:")
+        logging.info(f"Command: {' '.join(cmd)}")
+        logging.info(f"Return code: {e.returncode}")
+        logging.info(f"stderr: {e.stderr}")
+        raise
+
 def run_sylph_query(
     database: str,
     reads: Union[str, List[str]],
