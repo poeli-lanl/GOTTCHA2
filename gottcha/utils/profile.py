@@ -211,6 +211,7 @@ def parse_args(ver, args):
         #assign default path for database name
         db_extfn = "syldb" if args_parsed.fast else "mmi"
 
+        # find the database index file if a directory is provided, and set the database prefix accordingly;
         if Path(args_parsed.database).is_dir():
             dbs = list(Path(args_parsed.database).glob(f"*.{db_extfn}"))
             if len(dbs) > 1:
@@ -220,6 +221,7 @@ def parse_args(ver, args):
             else:
                 args_parsed.database = str(dbs[0])
 
+        # check if the database file is provided with or without the extension, and remove the extension if provided
         if args_parsed.database.endswith(f'.{db_extfn}'):
             args_parsed.database = args_parsed.database.replace(f'.{db_extfn}', '')
 
@@ -228,26 +230,17 @@ def parse_args(ver, args):
             if not Path(f'{args_parsed.database}.{db_extfn}').is_file():
                 p.error(f'Database index {args_parsed.database}.{db_extfn} not found.')
 
-        if argvs.fast:
+        if args_parsed.fast:
             if not Path(f'{args_parsed.database}.{db_extfn}').is_file():
                 p.error(f'Database index {args_parsed.database}.{db_extfn} not found.')
             if not Path(f'{args_parsed.database}.zip').is_file():
-                p.error(f'Database file {args_parsed.database}.zip not found.')
+                p.error(f'Signature sequences file {args_parsed.database}.zip not found.')
 
         # check the existence of the taxonomic information file for the specified database
-        if args_parsed.taxInfo:
-            tax_info_path = Path(args_parsed.taxInfo)
-            if tax_info_path.is_dir():
-                tax_info_files = list(tax_info_path.glob(f"{Path(args_parsed.database).name}*.tax.tsv"))
-                if len(tax_info_files) > 1:
-                    p.error(f'Multiple tax info files found in {args_parsed.taxInfo} for the specified database. Please specify the exact file path with --taxInfo.')
-                elif len(tax_info_files) == 0:
-                    p.error(f'No tax info file found in {args_parsed.taxInfo} for the specified database. Please specify the exact file path with --taxInfo.')
-                else:
-                    args_parsed.taxInfo = str(tax_info_files[0])
-            elif not tax_info_path.is_file():
-                p.error(f'Tax info file {args_parsed.taxInfo} not found.')
-
+        if not Path(f'{args_parsed.database}.tax.tsv').is_file():
+            p.error(f'Taxonomic file {args_parsed.database}.tax.tsv not found.')
+        if not Path(f'{args_parsed.database}.stats').is_file():
+            p.error(f'Database stats file {args_parsed.database}.stats not found.')
 
     if args_parsed.input:
         for path in args_parsed.input:
@@ -680,16 +673,10 @@ def main(args):
 
         if Path(argvs.database + ".tax.tsv").exists():
             custom_taxa_tsv = Path(argvs.database + ".tax.tsv")
+        elif Path(argvs.database + ".taxa").exists():
+            custom_taxa_tsv = Path(argvs.database + ".taxa")
 
-        dbpath = None
-        if argvs.taxInfo:
-            if Path(argvs.taxInfo).is_dir():
-                dbpath = Path(argvs.taxInfo)
-            elif Path(argvs.taxInfo).is_file():
-                custom_taxa_tsv = Path(argvs.taxInfo)
-
-        taxonomy.loadTaxonomy(dbpath=dbpath,
-                              cus_taxonomy_file=custom_taxa_tsv,
+        taxonomy.loadTaxonomy(cus_taxonomy_file=custom_taxa_tsv,
                               auto_download=False)
         print_message(f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile)
 
