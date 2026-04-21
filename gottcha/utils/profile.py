@@ -21,7 +21,7 @@ try:
     import read_mapping
     import aggregate_results
     import extract_reads
-    import quant
+    import gottcha.utils.prefilter as prefilter
     import sig_archive
     from gottcha2 import __version__
 except ImportError:
@@ -34,7 +34,7 @@ except ImportError:
     import gottcha.utils.aggregate_results as aggregate_results
     import gottcha.utils.read_mapping as read_mapping
     import gottcha.utils.extract_reads as extract_reads
-    import gottcha.utils.quant as quant
+    import gottcha.utils.prefilter as prefilter
     import gottcha.utils.sig_archive as sig_archive
     from gottcha.gottcha2 import __version__
 
@@ -761,7 +761,7 @@ def main(args):
             if Path(sylph_input[0]).name.endswith(('.fa', '.fasta', '.fa.gz', '.fna', '.fna.gz', '.fasta.gz')):
                 print_message("Generating sketchs for FASTA input reads...", argvs.silent, begin_t, logfile)
                 try:
-                    sylph_result = quant.run_sylph_sketch(
+                    sylph_result = prefilter.run_sylph_sketch(
                         read_file=sylph_input[0],
                         outdir=str(argvs.outdir),
                         threads=argvs.threads,
@@ -780,7 +780,7 @@ def main(args):
 
             # Run Sylph query to get the list of signatures that are likely present in the input reads
             try:
-                sylph_result = quant.run_sylph_query(
+                sylph_result = prefilter.run_sylph_query(
                     database=sylph_db,
                     reads=sylph_input,
                     output=str(sylph_query_tsv),
