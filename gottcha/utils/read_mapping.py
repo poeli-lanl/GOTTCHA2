@@ -18,7 +18,7 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
 
     Parameters:
         reads (List): List of input read file paths
-        db (str): Path to the minimap2 database (without .mmi extension)
+        db (str): Path to the minimap2 index of the reference database
         threads (int): Number of threads to use
         mm_options (str): Minimap2 options for read mapping
         presetx (str): Minimap2 preset mode ('sr', 'map-pb', or 'map-ont')
@@ -45,7 +45,7 @@ def minimap2(reads: List, db: str, threads: int, mm_options: str, presetx: str, 
     if presetx != 'sr':
         sr_opts = f"-x {presetx} -N20 --secondary=no --sam-hit-only -a"
 
-    mm2_cmd    = f"minimap2 {sr_opts} -t{threads} {db}.mmi {input_file}"
+    mm2_cmd    = f"minimap2 {sr_opts} -t{threads} {db} {input_file}"
     filter_cmd = f"sed '/^@/d'"  # filter out header lines
 
     # proc = subprocess.Popen(cmd, shell=True, executable='/bin/bash', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, universal_newlines=True, bufsize=1)

@@ -8,22 +8,24 @@ import tarfile
 import hashlib
 from tqdm import *
 import argparse
-from gottcha import GOTTCHA_DB_LATEST
+from gottcha import GOTTCHA_DB_FULL_LATEST, GOTTCHA_DB_FAST_LATEST
 import logging
 
-def calculate_md5(file_path, chunk_size=8192):
-    md5 = hashlib.md5()
+def calculate_sha256(file_path, chunk_size=8192):
+    sha256 = hashlib.sha256()
     with open(file_path, 'rb') as fh:
         for chunk in iter(lambda: fh.read(chunk_size), b''):
-            md5.update(chunk)
-    return md5.hexdigest()
+            sha256.update(chunk)
+    return sha256.hexdigest()
 
 
 def parse_params(args):
     parser = argparse.ArgumentParser(prog='download.py', description="""This script will pull the latest version of the Gottcha2 database.""")
 
-    parser.add_argument('-u', '--url', default=GOTTCHA_DB_LATEST,
+    parser.add_argument('-u', '--url', required=False,
                     help='specify a URL to pull from (will override the default)')
+    parser.add_argument('-d', '--database', default='full',
+                    help='specify the type of database to download (full or fast)')
     parser.add_argument('-r', '--rank', default='species',
                     help='taxonomic rank of the database (superkingdom, phylum, class, order, famiily, genus, species)')
     return parser.parse_args(args)
@@ -35,7 +37,17 @@ def download_db(argvs):
 
     os.mkdir('database')
 
-    download_url = argvs.url
+    if not argvs.url:
+        if argvs.database == 'full':
+            download_url = GOTTCHA_DB_FULL_LATEST
+        elif argvs.database == 'fast':
+            download_url = GOTTCHA_DB_FAST_LATEST
+        else:
+            sys.exit('Invalid database type specified. Please choose "full" or "fast".')
+
+    if argvs.url:
+        download_url = argvs.url
+        
     archive_name = os.path.basename(download_url)
 
     logging.info(f"Downloading GOTTCHA2 database from {download_url}...")
@@ -51,11 +63,11 @@ def download_db(argvs):
                     pbar.update(len(chunk))
             pbar.close()
 
-    logging.info(f"Downloading GOTTCHA2 database MD5 checksum from {download_url}.md5...")
+    logging.info(f"Downloading GOTTCHA2 database SHA256 checksum from {download_url}.sha256...")
 
-    with requests.get(f"{download_url}.md5", stream=True) as r:
+    with requests.get(f"{download_url}.sha256", stream=True) as r:
         r.raise_for_status()
-        with open(f"{archive_name}.md5", 'wb') as f:
+        with open(f"{archive_name}.sha256", 'wb') as f:
             total_size = int(r.headers.get('Content-Length', 0))
             pbar = tqdm(total=total_size, unit='B', unit_scale=True, unit_divisor=1024)
             for chunk in r.iter_content(chunk_size=8192):
@@ -64,25 +76,24 @@ def download_db(argvs):
                     pbar.update(len(chunk))
             pbar.close()
 
-    # check md5
-    logging.info("Verifying MD5 checksum...")
+    logging.info("Verifying SHA256 checksum...")
 
-    with open(f"{archive_name}.md5", 'r') as f:
-        expected_md5 = f.read().strip().split()[0]
-    actual_md5 = calculate_md5(archive_name)
-    if actual_md5 != expected_md5:
+    with open(f"{archive_name}.sha256", 'r') as f:
+        expected_sha256 = f.read().strip().split()[0]
+    actual_sha256 = calculate_sha256(archive_name)
+    if actual_sha256 != expected_sha256:
         os.remove(archive_name)
-        os.remove(f"{archive_name}.md5")
-        sys.exit("MD5 checksum does not match expected value. Download may be corrupted. Please try again.")
+        os.remove(f"{archive_name}.sha256")
+        sys.exit("SHA256 checksum does not match expected value. Download may be corrupted. Please try again.")
 
-    logging.info("MD5 checksum verified successfully.")
+    logging.info("SHA256 checksum verified successfully.")
 
     logging.info(f"Extracting GOTTCHA2 database from {archive_name}...")
     with tarfile.open(archive_name) as tar:
         tar.extractall('database')
     logging.info("Database extraction completed.")
     os.remove(archive_name)
-    os.remove(f"{archive_name}.md5")
+    os.remove(f"{archive_name}.sha256")
     logging.info("Temporary files removed. Database is ready to use.")
 
 def main(args):

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse as ap
+from asyncio import threads
 import re
 import sys, os, time, subprocess
 import pandas as pd
@@ -20,6 +21,8 @@ try:
     import read_mapping
     import aggregate_results
     import extract_reads
+    import gottcha.utils.prefilter as prefilter
+    import sig_archive
     from gottcha2 import __version__
 except ImportError:
     # Fall back to direct import (for script usage)
@@ -31,6 +34,8 @@ except ImportError:
     import gottcha.utils.aggregate_results as aggregate_results
     import gottcha.utils.read_mapping as read_mapping
     import gottcha.utils.extract_reads as extract_reads
+    import gottcha.utils.prefilter as prefilter
+    import gottcha.utils.sig_archive as sig_archive
     from gottcha.gottcha2 import __version__
 
 def parse_args(ver, args):
@@ -70,9 +75,6 @@ def parse_args(ver, args):
     p.add_argument('-l','--dbLevel', metavar='[LEVEL]', type=str, default='',
                     choices=['superkingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species', 'strain'],
                     help="""Specify the taxonomic level of the input database. You can choose one rank from "superkingdom", "phylum", "class", "order", "family", "genus", "species" and "strain". The value will be auto-detected if the input database ended with levels (e.g. GOTTCHA_db.species).""")
-
-    p.add_argument('-ti','--taxInfo', metavar='[PATH]', type=str, default='',
-                    help="""Specify the path to the taxonomy information directory or file. The program will attempt to locate a matching .tax.tsv file for the specified database. If it cannot find one, it will use the ‘taxonomy_db’ directory located in the same directory as the executable by default.""")
 
     p.add_argument('-np','--nanopore', action="store_true",
                     help="""Indicate that the input reads are sequenced from Oxford Nanopore (ONT) sequencing platform. This option enables read preprocessing and set "-er 0.03 -mi 0.9 -mf 0.9 -ml 100" by default.""")
@@ -163,6 +165,12 @@ def parse_args(ver, args):
     p.add_argument('-c','--stdout', action="store_true",
                     help="Write on standard output.")
 
+    p.add_argument('--fast', action="store_true",
+                    help="Fast mode")
+
+    p.add_argument('--fast-min-kmer', type=int, default=None,
+                    help="Minimum k-mer size for fast mode. [default: None]")
+
     p.add_argument('--mpa', action="store_true",
                     help="Generate output in MetaPhlAn format.")
 
@@ -202,21 +210,38 @@ def parse_args(ver, args):
     # Auto-detect database path and prefix, and check the existence of input files and database index
     if args_parsed.database:
         #assign default path for database name
+        db_extfn = "syldb" if args_parsed.fast else "mmi"
+
+        # find the database index file if a directory is provided, and set the database prefix accordingly;
         if Path(args_parsed.database).is_dir():
-            dbs = list(Path(args_parsed.database).glob("*.mmi"))
+            dbs = list(Path(args_parsed.database).glob(f"*.{db_extfn}"))
             if len(dbs) > 1:
-                p.error(f'Multiple .mmi files found in {args_parsed.database}. Please specify one with database prefix.')
+                p.error(f'Multiple .{db_extfn} files found in {args_parsed.database}. Please specify one with database prefix.')
             elif len(dbs) == 0:
-                p.error(f'No .mmi file found in {args_parsed.database}. Please specify the database prefix or the path to the .mmi file.')
+                p.error(f'No .{db_extfn} file found in {args_parsed.database}. Please specify the database prefix or the path to the .{db_extfn} file.')
             else:
                 args_parsed.database = str(dbs[0])
 
-        if args_parsed.database.endswith(".mmi"):
-            args_parsed.database = args_parsed.database.replace('.mmi','')
+        # check if the database file is provided with or without the extension, and remove the extension if provided
+        if args_parsed.database.endswith(f'.{db_extfn}'):
+            args_parsed.database = args_parsed.database.replace(f'.{db_extfn}', '')
 
+        # Only check the existence of the database index file if input reads are provided
         if args_parsed.input:
-            if not Path(args_parsed.database + ".mmi").is_file():
-                p.error('Database index %s.mmi not found.' % args_parsed.database)
+            if not Path(f'{args_parsed.database}.{db_extfn}').is_file():
+                p.error(f'Database index {args_parsed.database}.{db_extfn} not found.')
+
+        if args_parsed.fast:
+            if not Path(f'{args_parsed.database}.{db_extfn}').is_file():
+                p.error(f'Database index {args_parsed.database}.{db_extfn} not found.')
+            if not Path(f'{args_parsed.database}.zip').is_file():
+                p.error(f'Signature sequences file {args_parsed.database}.zip not found.')
+
+        # check the existence of the taxonomic information file for the specified database
+        if not Path(f'{args_parsed.database}.tax.tsv').is_file():
+            p.error(f'Taxonomic file {args_parsed.database}.tax.tsv not found.')
+        if not Path(f'{args_parsed.database}.stats').is_file():
+            p.error(f'Database stats file {args_parsed.database}.stats not found.')
 
     if args_parsed.input:
         for path in args_parsed.input:
@@ -532,8 +557,8 @@ def main(args):
 
     logging.basicConfig(
         level=logging_level,
-        format='%(asctime)s [%(levelname)s] [%(module)s] %(message)s',
-        datefmt='%Y-%m-%d %H:%M',
+        format='[%(asctime)s] [%(levelname)s] [%(module)s] %(message)s',
+        datefmt='%Y%m%d %H:%M:%S',
    )
 
     #dependency check
@@ -542,6 +567,8 @@ def main(args):
 
     dependency_check("minimap2")
     dependency_check("samtools")
+    if argvs.fast:
+        dependency_check("sylph")
 
     #prepare output object
     argvs.relAbu = argvs.relAbu.upper()
@@ -600,46 +627,47 @@ def main(args):
 
     print_message(f"GOTTCHA (v{__version__})", argvs.silent, begin_t, logfile)
     print_message(f"Arguments and dependencies checked:", argvs.silent, begin_t, logfile)
-    print_message(f"    Database           : {argvs.database}",    argvs.silent, begin_t, logfile)
-    print_message(f"    Database level     : {argvs.dbLevel}",     argvs.silent, begin_t, logfile)
-    print_message(f"    Abundance          : {argvs.relAbu}",      argvs.silent, begin_t, logfile)
-    print_message(f"    Output directory   : {argvs.outdir}",      argvs.silent, begin_t, logfile)
-    print_message(f"    Output prefix      : {argvs.prefix}",      argvs.silent, begin_t, logfile)
-    print_message(f"    Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile)
+    print_message(f" - Database           : {argvs.database}",    argvs.silent, begin_t, logfile)
+    print_message(f" - Database level     : {argvs.dbLevel}",     argvs.silent, begin_t, logfile)
+    print_message(f" - Abundance          : {argvs.relAbu}",      argvs.silent, begin_t, logfile)
+    print_message(f" - Output directory   : {argvs.outdir}",      argvs.silent, begin_t, logfile)
+    print_message(f" - Output prefix      : {argvs.prefix}",      argvs.silent, begin_t, logfile)
+    print_message(f" - Threads            : {argvs.threads}",     argvs.silent, begin_t, logfile)
+    print_message(f" - Fast mode          : {argvs.fast}",        argvs.silent, begin_t, logfile)
     if argvs.input:
-        print_message(f"    Input Reads        : {argvs.input}",     argvs.silent, begin_t, logfile)
+        print_message(f" - Input Reads        : {argvs.input}",     argvs.silent, begin_t, logfile)
     if argvs.bam:
-        print_message(f"    Input BAM File     : {bamfile}",           argvs.silent, begin_t, logfile)
+        print_message(f" - Input BAM File     : {bamfile}",           argvs.silent, begin_t, logfile)
     if argvs.nanopore:
-        print_message(f"    Nanopore Mode      : Enabled",              argvs.silent, begin_t, logfile)
+        print_message(f" - Nanopore Mode      : Enabled",              argvs.silent, begin_t, logfile)
     if argvs.errorRate:
-        print_message(f"    Read Error Rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile)
+        print_message(f" - Read Error Rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile)
     if argvs.accList:
-        print_message(f"    AOI List           : {argvs.accList}", argvs.silent, begin_t, logfile)
+        print_message(f" - AOI List           : {argvs.accList}", argvs.silent, begin_t, logfile)
     if argvs.accList:
-        print_message(f"    AOI Reads Action   : {argvs.accListAction}", argvs.silent, begin_t, logfile)
+        print_message(f" - AOI Reads Action   : {argvs.accListAction}", argvs.silent, begin_t, logfile)
     if argvs.minCov > 0:
-        print_message(f"    Minimal SIG Cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile)
+        print_message(f" - Minimal SIG Cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile)
     if argvs.minLen > 0:
-        print_message(f"    Minimal SIG Length : {argvs.minLen}",      argvs.silent, begin_t, logfile)
+        print_message(f" - Minimal SIG Length : {argvs.minLen}",      argvs.silent, begin_t, logfile)
     if argvs.minReads > 0:
-        print_message(f"    Minimal Reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile)
+        print_message(f" - Minimal Reads      : {argvs.minReads}",    argvs.silent, begin_t, logfile)
     if argvs.extract:
-        print_message(f"    Extract Taxa       : {argvs.extract}",     argvs.silent, begin_t, logfile)
+        print_message(f" - Extract Taxa       : {argvs.extract}",     argvs.silent, begin_t, logfile)
     if argvs.extractOnly:
-        print_message(f"    Extract Only       : {argvs.extractOnly}", argvs.silent, begin_t, logfile)
+        print_message(f" - Extract Only       : {argvs.extractOnly}", argvs.silent, begin_t, logfile)
     if argvs.maxZscore > 0:
-        print_message(f"    Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile)
+        print_message(f" - Maximal zScore     : {argvs.maxZscore}",   argvs.silent, begin_t, logfile)
     if logfile_prev:
-        print_message(f"    Load criteria from : {logfile_prev}",      argvs.silent, begin_t, logfile)
+        print_message(f" - Load criteria from : {logfile_prev}",      argvs.silent, begin_t, logfile)
     if argvs.matchIdentity != None:
-        print_message(f"    Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile)
+        print_message(f" - Min Match Identity : {argvs.matchIdentity}", argvs.silent, begin_t, logfile)
     if argvs.matchFraction != None:
-        print_message(f"    Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile)
+        print_message(f" - Min Match Fraction : {argvs.matchFraction}", argvs.silent, begin_t, logfile)
     if argvs.matchLength != None:
-        print_message(f"    Min Match Length   : {argvs.matchLength}", argvs.silent, begin_t, logfile)
+        print_message(f" - Min Match Length   : {argvs.matchLength}", argvs.silent, begin_t, logfile)
     if argvs.sniScore != None:
-        print_message(f"    SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile)
+        print_message(f" - SNI-score (g,s,n)  : {argvs.sniScore}",    argvs.silent, begin_t, logfile)
 
     #load taxonomy for taxonomic aggregation and annotation
     if not argvs.extractOnly:
@@ -647,17 +675,10 @@ def main(args):
 
         if Path(argvs.database + ".tax.tsv").exists():
             custom_taxa_tsv = Path(argvs.database + ".tax.tsv")
+        elif Path(argvs.database + ".taxa").exists():
+            custom_taxa_tsv = Path(argvs.database + ".taxa")
 
-        dbpath = None
-        if argvs.taxInfo:
-            if Path(argvs.taxInfo).is_dir():
-                dbpath = Path(argvs.taxInfo)
-            elif Path(argvs.taxInfo).is_file():
-                custom_taxa_tsv = Path(argvs.taxInfo)
-
-        taxonomy.loadTaxonomy(dbpath=dbpath,
-                              cus_taxonomy_file=custom_taxa_tsv,
-                              auto_download=False)
+        taxonomy.loadTaxonomy(cus_taxonomy_file=custom_taxa_tsv, auto_download=False)
         print_message(f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile)
 
         #load database stats
@@ -675,16 +696,144 @@ def main(args):
         acc_list = load_acc_list(argvs.accList)
         print_message(f" - {len(acc_list):,} accession/signature of interest loaded.", argvs.silent, begin_t, logfile)
 
-    #main process
+    # Summary of the Main Process:
+    #
+    # Input Reads
+    #     ↓
+    # [Nanopore Preprocessing] (optional)
+    #     ↓
+    # [Run fast query] (sylph; optionall; if fast mode is on)
+    #     ↓
+    # [Extract queried signatures] (optionall; if fast mode is on)
+    #     ↓
+    # Read Mapping (minimap2)
+    #     ↓
+    # Alignments (SAM File)
+    #     ↓
+    # [Remove Multiple Hits] (if multi-part index)
+    #     ↓
+    # [Remove Inconsistent Chunks] (if nanopore)
+    #     ↓
+    # BAM Conversion + Indexing
+    #     ↓
+    # Parse & Filter Alignments
+    #     ↓
+    # Group to Strains
+    #     ↓
+    # Aggregate Taxonomy
+    #     ↓
+    # Generate Reports
+    #     ↓
+    # [Extract Reads] (optional)
+
     if argvs.input:
+        # if fast mode is on, run Sylph query to prefilter the reference genomes and create a smaller reference for read mapping; 
+        # otherwise, use the full database index for read mapping
+        minimap2_index = "" if argvs.fast else f"{argvs.database}.mmi"
+        
+        # The original input reads for Sylph sketch and query; Not the split reads for minimap2 mapping if nanopore option is on
+        sylph_input = argvs.input
+
         # if nanopore option is on, preprocessing reads
         if argvs.nanopore:
             print_message("Checking nanopore read files...", argvs.silent, begin_t, logfile)
             argvs.input = ont_utils.preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
             split_read_flag = True
 
+        if argvs.fast:
+            print_message("Prefiltering reference genomes...", argvs.silent, begin_t, logfile)
+            sylph_db = f"{argvs.database}.syldb"
+            g2_archive = f"{argvs.database}.zip"
+            sylph_query_tsv = Path(argvs.outdir) / f"{argvs.prefix}.sylph_query.tsv"
+            queried_signatures_file = Path(argvs.outdir) / f"{argvs.prefix}.sylph_queried_signatures.txt"
+            extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.gz"
+            argvs.m2options += " -w12 -k24" # use smaller k-mer and minimizer length for better sensitivity in the prefiltering query; these values are based on testing and benchmarking, but can be further optimized in the future
+            
+            # extract subsample (cXXX) rate from sylph_db string, default set to 100
+            subsampling_rate = 100
+            match = re.search(r'c(\d+)\.', sylph_db)
+            if match:
+                subsampling_rate = int(match.group(1))
+
+            fast_min_kmer = argvs.fast_min_kmer if argvs.fast_min_kmer else 50
+
+            # Run Sylph sketch if the input file is in FASTA format
+            if Path(sylph_input[0]).name.endswith(('.fa', '.fasta', '.fa.gz', '.fna', '.fna.gz', '.fasta.gz')):
+                print_message("Generating sketchs for FASTA input reads...", argvs.silent, begin_t, logfile)
+                try:
+                    sylph_result = prefilter.run_sylph_sketch(
+                        read_file=sylph_input[0],
+                        outdir=str(argvs.outdir),
+                        threads=argvs.threads,
+                        subsampling_rate=subsampling_rate,
+                    )
+                except (FileNotFoundError, subprocess.CalledProcessError) as e:
+                    print_message(f"ERROR: prefiltering failed: {e}", argvs.silent, begin_t, logfile, errorout=1)
+
+                with logfile.open("a", encoding="utf-8") as f:
+                    if sylph_result.stdout:
+                        f.write(sylph_result.stdout)
+                    if sylph_result.stderr:
+                        f.write(sylph_result.stderr)
+                
+                sylph_input = [str(Path(argvs.outdir) / f"{Path(sylph_input[0]).name}.sylsp")]
+
+            # Run Sylph query to get the list of signatures that are likely present in the input reads
+            try:
+                sylph_result = prefilter.run_sylph_query(
+                    database=sylph_db,
+                    reads=sylph_input,
+                    output=str(sylph_query_tsv),
+                    threads=argvs.threads,
+                    subsampling_rate=subsampling_rate,
+                    minimum_kmer=fast_min_kmer,
+                    read_seq_id=float(100-argvs.errorRate*100)
+                )
+            except (FileNotFoundError, subprocess.CalledProcessError) as e:
+                print_message(f"ERROR: prefiltering failed: {e}", argvs.silent, begin_t, logfile, errorout=1)
+
+            with logfile.open("a", encoding="utf-8") as f:
+                if sylph_result.stdout:
+                    f.write(sylph_result.stdout)
+                if sylph_result.stderr:
+                    f.write(sylph_result.stderr)
+
+            try:
+                pd.read_csv(sylph_query_tsv, 
+                            sep='\t', 
+                            usecols=['Genome_file'], 
+                            dtype={'Genome_file': str})['Genome_file'].dropna().str.strip().to_csv(queried_signatures_file, index=False, header=False)
+            except pd.errors.EmptyDataError:
+                queried_signatures = pd.Series(dtype=str)
+            except (FileNotFoundError, ValueError) as e:
+                print_message(f"ERROR: unable to parse Sylph query output {sylph_query_tsv}: {e}", argvs.silent, begin_t, logfile, errorout=1)
+
+            filenames = sig_archive.read_file_list(queried_signatures_file, filename_only=True)
+            print_message(f" - Identified {len(filenames):,} reference genomes.", argvs.silent, begin_t, logfile)
+            
+            # Extract those signatures from the archive to create a smaller reference for read mapping
+            extracted_content, processed_files, skipped_files = sig_archive.quick_concat(g2_archive,
+                                                                                         separator=str('\n').encode('utf-8'),
+                                                                                         skip_missing=False, 
+                                                                                         filenames=filenames)
+
+            extracted_reference.write_bytes(extracted_content)
+            if extracted_reference.stat().st_size == 0:
+                print_message(
+                    f"ERROR: no queried signatures could be extracted from {sylph_db}; {extracted_reference} is empty.",
+                    argvs.silent,
+                    begin_t,
+                    logfile,
+                    errorout=1
+                )
+
+            if skipped_files:
+                print_message(f" - {len(skipped_files):,} queried signatures were not found in the archive.", argvs.silent, begin_t, logfile)
+            print_message(f" - {len(processed_files):,} reference genomes extracted.", argvs.silent, begin_t, logfile)
+            minimap2_index = str(extracted_reference)
+
         print_message("Running read-mapping...", argvs.silent, begin_t, logfile)
-        exitcode, cmd, input_read_count, multi_part_index_flag = read_mapping.minimap2(argvs.input, argvs.database, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
+        exitcode, cmd, input_read_count, multi_part_index_flag = read_mapping.minimap2(argvs.input, minimap2_index, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
         logging.info(f"COMMAND: {cmd}")
 
         if exitcode != 0:
@@ -729,9 +878,9 @@ def main(args):
         if os.path.isfile(os.path.abspath(samfile)):
             print_message("Converting to BAM file...", argvs.silent, begin_t, logfile)
             sam_to_bam.convert_sam_to_bam(input_sam=os.path.abspath(samfile),
-                                                  output_bam=os.path.abspath(bamfile),
-                                                  threads=argvs.threads,
-                                                  quiet=argvs.silent)
+                                          output_bam=os.path.abspath(bamfile),
+                                          threads=argvs.threads,
+                                          quiet=argvs.silent)
             print_message(f"BAM file saved to {bamfile}...", argvs.silent, begin_t, logfile)
             
             file_path = Path(samfile)
@@ -742,11 +891,11 @@ def main(args):
         if Path(bamfile).exists() and Path(f"{bamfile}.bai").exists():
             print_message("Processing alignments...", argvs.silent, begin_t, logfile)
             ref_chunk_results = process_bam.parse_aln_from_bam(bam_path=bamfile,
-                                                             processes=argvs.threads,
-                                                             min_frac=argvs.matchFraction,
-                                                             min_idt=argvs.matchIdentity,
-                                                             min_alen=argvs.matchLength,
-                                                             split_read_flag=split_read_flag)
+                                                               processes=argvs.threads,
+                                                               min_frac=argvs.matchFraction,
+                                                               min_idt=argvs.matchIdentity,
+                                                               min_alen=argvs.matchLength,
+                                                               split_read_flag=split_read_flag)
 
             str_df, aoi_read_count = aggregate_results.group_refs_to_strains(ref_chunk_results, acc_list, argvs.accListAction, df_stats)
 

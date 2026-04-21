@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
-__version__   = "2.3.1"
+__version__   = "2.4.0"
 __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
-__credits__   = ["Po-E Li", 
-                 "Anna Chernikov", 
-                 "Jason Gans", 
-                 "Tracey Freites", 
-                 "Patrick Chain"]
+__credits__   = ["Po-E Li", "Anna Chernikov"]
 try:
     from .utils import profile
-    from .utils import gottcha2
     from .utils import download
     from .utils import sam_to_bam
 except ImportError:
     # If the above relative imports fail, try absolute imports (for direct execution)
     from utils import profile
-    from utils import gottcha2
     from utils import download
     from utils import sam_to_bam
 
@@ -40,6 +34,8 @@ Commands:
 Examples:
     gottcha2 profile -i reads.fastq -d database/db_prefix
 
+    gottcha2 fast-profile -i reads.fastq -d database/db_prefix
+
     gottcha2 extract -d prefix.bam -d database/db_prefix -e 666
 
     gottcha2 sam2bam -i prefix.sam -o prefix.bam
@@ -54,6 +50,9 @@ def cli():
     if len(args) < 1:
         usage()
     elif args[0] == "profile":
+        profile.main(args)
+    elif args[0] == "fast-profile":
+        args.append("--fast")
         profile.main(args)
     elif args[0] == "download":
         download.main(args[1:])

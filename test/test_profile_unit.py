@@ -17,6 +17,8 @@ class TestProfileUtils(unittest.TestCase):
             db_prefix = os.path.join(tmp, "gottcha_db.species")
             read_path = os.path.join(tmp, "reads.fastq")
             open(db_prefix + ".mmi", "w").close()
+            open(db_prefix + ".tax.tsv", "w").close()
+            open(db_prefix + ".stats", "w").close()
             open(read_path, "w").close()
 
             args = profile.parse_args("test", ["profile", "-i", read_path, "-d", db_prefix])
@@ -32,6 +34,8 @@ class TestProfileUtils(unittest.TestCase):
             db_prefix = os.path.join(tmp, "gottcha_db.species")
             read_path = os.path.join(tmp, "ont.fastq")
             open(db_prefix + ".mmi", "w").close()
+            open(db_prefix + ".tax.tsv", "w").close()
+            open(db_prefix + ".stats", "w").close()
             open(read_path, "w").close()
 
             args = profile.parse_args("test", ["profile", "-i", read_path, "-d", db_prefix, "-np"])
@@ -45,6 +49,8 @@ class TestProfileUtils(unittest.TestCase):
             db_prefix = os.path.join(tmp, "gottcha_db.species")
             read_path = os.path.join(tmp, "reads.fastq")
             open(db_prefix + ".mmi", "w").close()
+            open(db_prefix + ".tax.tsv", "w").close()
+            open(db_prefix + ".stats", "w").close()
             open(read_path, "w").close()
 
             args = profile.parse_args(
