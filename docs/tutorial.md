@@ -31,11 +31,11 @@ GOTTCHA2 is a gene-independent, signature-based metagenomic taxonomic profiler d
 
 Recent GOTTCHA2 releases through v2.4.0 include several workflow changes that are worth knowing before you start:
 
-- **BAM-first workflow**: modern runs use sorted and indexed BAM for downstream processing instead of keeping SAM as the main intermediate.
+- **Fast prefiltering mode**: `fast-profile` uses `sylph` to prefilter the reference set before read mapping, which can substantially reducing both runtime and memory usage.
 - **Current CLI**: the supported entry points are `profile`, `fast-profile`, `extract`, `sam2bam`, `download`, and `version`.
-- **Fast prefiltering mode**: `fast-profile` uses `sylph` to prefilter the reference set before read mapping, which can substantially reduce runtime on large databases.
 - **Updated identity handling**: the reported `SNI_SCORE` is based on consensus identity rather than the legacy read-weighted identity metric.
-- **Legacy compatibility**: the older `gottcha2.py` workflow is still available for compatibility, but it is frozen at v2.2.3 and should not be used for new analyses.
+- **BAM-based workflow**: runs use sorted and indexed BAM for downstream processing instead of keeping SAM as the main intermediate.
+- **Legacy compatibility**: the older `gottcha2.py` workflow (SAM-based) is still available for compatibility, but it is frozen at v2.2.3.
 
 ---
 
@@ -117,21 +117,21 @@ Additional files used by fast mode:
 - `gottcha_db.<level>.fna.syldb` `sylph` database for prefiltering
 - `gottcha_db.<level>.fna.zip` archived signature sequences used to build the reduced reference
 
-You should pass the shared prefix or database directory to `-d/--database`, for example:
+You should pass the shared prefix or database directory to `-d/--database`. The required files will be automatically located. For example:
 
 ```text
-/path/to/db_dir/gottcha_db.species.fna
+/path/to/db/gottcha_db.species.fna
 ```
 
 or 
 
 ```text
-/path/to/db_dir/
+/path/to/db
 ```
 
 ### Download helper
 
-Use the built-in downloader to fetch the default database tarball into a new `database/` directory:
+[Not available yet] Use the built-in downloader to fetch the default database tarball into a new `database/` directory:
 
 ```bash
 gottcha2 download
@@ -151,7 +151,7 @@ gottcha2 download --help
 
 ```bash
 gottcha2 profile \
-  -d /path/to/gottcha_db.species.fna \
+  -d /path/to/db/gottcha_db.species.fna \
   -i sample_R1.fastq.gz sample_R2.fastq.gz \
   -t 8 \
   -o out \
@@ -162,7 +162,7 @@ gottcha2 profile \
 
 ```bash
 gottcha2 profile \
-  -d /path/to/gottcha_db.species.fna \
+  -d /path/to/db/gottcha_db.species.fna \
   -i sample.fastq.gz \
   -t 8 \
   -o out
@@ -174,7 +174,7 @@ Nanopore mode expects a single input file:
 
 ```bash
 gottcha2 profile \
-  -d /path/to/gottcha_db.species.fna \
+  -d /path/to/db/gottcha_db.species.fna \
   -i ont_reads.fastq.gz \
   --nanopore \
   -t 8 \
@@ -188,7 +188,7 @@ If you already have a sorted and indexed BAM from a previous GOTTCHA2 run, you c
 ```bash
 gottcha2 profile \
   -b sample.gottcha_species.bam \
-  -d /path/to/gottcha_db.species.fna \
+  -d /path/to/db/gottcha_db.species.fna \
   -Mc 0.01 \
   -Mr 10 \
   -mi 0.95 \
@@ -200,7 +200,7 @@ gottcha2 profile \
 
 ```bash
 gottcha2 fast-profile \
-  -d /path/to/gottcha_db.species.fna \
+  -d /path/to/db/gottcha_db.species.fna \
   -i sample.fastq.gz \
   -t 8 \
   -o out
@@ -277,7 +277,7 @@ If auto-detection is not possible, set it explicitly with `-l/--dbLevel`.
 
 ## Fast profile mode
 
-`fast-profile` is a convenience wrapper for `profile --fast`. It adds a prefiltering step powered by `sylph` before read mapping:
+`fast-profile` is a convenience wrapper for `profile --fast`. It adds a prefiltering step utilized by `sylph` before read mapping:
 
 1. query the `.syldb` database against the input sample
 2. collect the subset of candidate signatures
