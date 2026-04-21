@@ -34,7 +34,7 @@ Commands:
 Examples:
     gottcha2 profile -i reads.fastq -d database/db_prefix
 
-    gottcha2 profile-fast -i reads.fastq -d database/db_prefix
+    gottcha2 fast-profile -i reads.fastq -d database/db_prefix
 
     gottcha2 extract -d prefix.bam -d database/db_prefix -e 666
 
