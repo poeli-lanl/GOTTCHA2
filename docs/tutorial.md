@@ -494,7 +494,7 @@ For `profile`, keep the database sidecar files next to the database prefix. At m
 <db>.stats
 ```
 
-For `fast-profile`, it additionally expects:
+For `fast-profile`, it expects:
 
 ```text
 <db>.syldb
