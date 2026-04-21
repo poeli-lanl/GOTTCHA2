@@ -727,15 +727,18 @@ def main(args):
     # [Extract Reads] (optional)
 
     if argvs.input:
+        # if fast mode is on, run Sylph query to prefilter the reference genomes and create a smaller reference for read mapping; 
+        # otherwise, use the full database index for read mapping
+        minimap2_index = "" if argvs.fast else f"{argvs.database}.mmi"
+        
+        # The original input reads for Sylph sketch and query; Not the split reads for minimap2 mapping if nanopore option is on
+        sylph_input = argvs.input
+
         # if nanopore option is on, preprocessing reads
         if argvs.nanopore:
             print_message("Checking nanopore read files...", argvs.silent, begin_t, logfile)
             argvs.input = ont_utils.preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
             split_read_flag = True
-
-        # if fast mode is on, run Sylph query to prefilter the reference genomes and create a smaller reference for read mapping; 
-        # otherwise, use the full database index for read mapping
-        minimap2_index = "" if argvs.fast else f"{argvs.database}.mmi"
 
         if argvs.fast:
             print_message("Prefiltering reference genomes...", argvs.silent, begin_t, logfile)
@@ -745,7 +748,6 @@ def main(args):
             queried_signatures_file = Path(argvs.outdir) / f"{argvs.prefix}.sylph_queried_signatures.txt"
             extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.gz"
             argvs.m2options += " -w12 -k24" # use smaller k-mer and minimizer length for better sensitivity in the prefiltering query; these values are based on testing and benchmarking, but can be further optimized in the future
-            sylph_intput = argvs.input
             
             # extract subsample (cXXX) rate from sylph_db string, default set to 100
             subsampling_rate = 100
@@ -756,11 +758,11 @@ def main(args):
             fast_min_kmer = argvs.fast_min_kmer if argvs.fast_min_kmer else 50
 
             # Run Sylph sketch if the input file is in FASTA format
-            if Path(argvs.input[0]).name.endswith(('.fa', '.fasta', '.fa.gz', '.fna', '.fna.gz', '.fasta.gz')):
+            if Path(sylph_input[0]).name.endswith(('.fa', '.fasta', '.fa.gz', '.fna', '.fna.gz', '.fasta.gz')):
                 print_message("Generating sketchs for FASTA input reads...", argvs.silent, begin_t, logfile)
                 try:
                     sylph_result = quant.run_sylph_sketch(
-                        read_file=argvs.input[0],
+                        read_file=sylph_input[0],
                         outdir=str(argvs.outdir),
                         threads=argvs.threads,
                         subsampling_rate=subsampling_rate,
@@ -774,13 +776,13 @@ def main(args):
                     if sylph_result.stderr:
                         f.write(sylph_result.stderr)
                 
-                sylph_intput = [str(Path(argvs.outdir) / f"{Path(argvs.input[0]).name}.sylsp")]
+                sylph_input = [str(Path(argvs.outdir) / f"{Path(sylph_input[0]).name}.sylsp")]
 
             # Run Sylph query to get the list of signatures that are likely present in the input reads
             try:
                 sylph_result = quant.run_sylph_query(
                     database=sylph_db,
-                    reads=sylph_intput,
+                    reads=sylph_input,
                     output=str(sylph_query_tsv),
                     threads=argvs.threads,
                     subsampling_rate=subsampling_rate,
@@ -807,7 +809,7 @@ def main(args):
                 print_message(f"ERROR: unable to parse Sylph query output {sylph_query_tsv}: {e}", argvs.silent, begin_t, logfile, errorout=1)
 
             filenames = sig_archive.read_file_list(queried_signatures_file, filename_only=True)
-            print_message(f" - Identified {len(filenames):,} signatures of genomes.", argvs.silent, begin_t, logfile)
+            print_message(f" - Identified {len(filenames):,} reference genomes.", argvs.silent, begin_t, logfile)
             
             # Extract those signatures from the archive to create a smaller reference for read mapping
             extracted_content, processed_files, skipped_files = sig_archive.quick_concat(g2_archive,
