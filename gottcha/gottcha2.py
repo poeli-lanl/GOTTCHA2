@@ -4,13 +4,11 @@ __author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Labora
 __credits__   = ["Po-E Li", "Anna Chernikov"]
 try:
     from .utils import profile
-    from .utils import gottcha2
     from .utils import download
     from .utils import sam_to_bam
 except ImportError:
     # If the above relative imports fail, try absolute imports (for direct execution)
     from utils import profile
-    from utils import gottcha2
     from utils import download
     from utils import sam_to_bam
 

@@ -8,7 +8,7 @@ import tarfile
 import hashlib
 from tqdm import *
 import argparse
-from gottcha import GOTTCHA_DB_LATEST
+from gottcha import GOTTCHA_DB_FULL_LATEST, GOTTCHA_DB_FAST_LATEST
 import logging
 
 def calculate_sha256(file_path, chunk_size=8192):
@@ -22,8 +22,10 @@ def calculate_sha256(file_path, chunk_size=8192):
 def parse_params(args):
     parser = argparse.ArgumentParser(prog='download.py', description="""This script will pull the latest version of the Gottcha2 database.""")
 
-    parser.add_argument('-u', '--url', default=GOTTCHA_DB_LATEST,
+    parser.add_argument('-u', '--url', required=False,
                     help='specify a URL to pull from (will override the default)')
+    parser.add_argument('-d', '--database', default='full',
+                    help='specify the type of database to download (full or fast)')
     parser.add_argument('-r', '--rank', default='species',
                     help='taxonomic rank of the database (superkingdom, phylum, class, order, famiily, genus, species)')
     return parser.parse_args(args)
@@ -35,7 +37,17 @@ def download_db(argvs):
 
     os.mkdir('database')
 
-    download_url = argvs.url
+    if not argvs.url:
+        if argvs.database == 'full':
+            download_url = GOTTCHA_DB_FULL_LATEST
+        elif argvs.database == 'fast':
+            download_url = GOTTCHA_DB_FAST_LATEST
+        else:
+            sys.exit('Invalid database type specified. Please choose "full" or "fast".')
+
+    if argvs.url:
+        download_url = argvs.url
+        
     archive_name = os.path.basename(download_url)
 
     logging.info(f"Downloading GOTTCHA2 database from {download_url}...")

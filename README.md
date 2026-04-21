@@ -28,6 +28,7 @@ GOTTCHA2 profiler is written in Python 3 and uses minimap2 to map reads to signa
 - biom-format
 - pysam
 - tqdm
+- sylph
 
 -------------------------------------------------------------------
 ## QUICK START
@@ -50,7 +51,15 @@ GOTTCHA2 profiler is written in Python 3 and uses minimap2 to map reads to signa
 
 3. Run GOTTCHA2:
         
-        $ gottcha2 profile -d RefSeq-r220_BAVxH-cg/gottcha_db.species.fna -t 8 -i <FASTQ>
+        Regular mode:
+
+        `gottcha2 profile -d /path/to/db/ -t 8 -i <FASTQ>`
+
+        OR
+
+        Fast-profiling mode:
+
+        `gottcha2 fast-profile -d /path/to/db/ -t 8 -i <FASTQ>`
 
 -------------------------------------------------------------------
 ## RESULT
