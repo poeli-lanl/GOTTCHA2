@@ -31,8 +31,7 @@ GOTTCHA2 is a gene-independent, signature-based metagenomic taxonomic profiler f
 
 Recent GOTTCHA2 releases through v2.4.0 include several workflow changes that are worth knowing before you start:
 
-- **Fast prefiltering mode**: `fast-profile` uses `sylph` to prefilter the reference set before read mapping, often reducing runtime by about 5–10× and memory usage by roughly 2–10×, depending on the sample and database.
-
+- **Fast prefiltering mode**: `fast-profile` uses `sylph` to prefilter the reference set before read mapping while producing results comparable to the standard `profile` workflow. Depending on the sample and database, it often reduces runtime by about 5–10× and memory usage by roughly 2–10×.
 - **Current CLI**: the supported entry points are `profile`, `fast-profile`, `extract`, `sam2bam`, `download`, and `version`.
 - **Updated identity handling**: the reported `SNI_SCORE` is based on consensus identity rather than the legacy read-weighted identity metric.
 - **BAM-based workflow**: runs use sorted and indexed BAM for downstream processing instead of keeping SAM as the main intermediate.
@@ -153,7 +152,7 @@ These examples use the most common workflows. Replace the example paths and file
 ### Example conventions
 
 - `gottcha2 profile` maps reads to the selected signature database and produces taxonomic reports.
-- `gottcha2 fast-profile` first uses `sylph` to narrow the reference set, then runs the profiling workflow on the reduced reference.
+- `gottcha2 fast-profile` first narrow the reference set, then runs the profiling workflow on the reduced reference.
 - `gottcha2 extract` pulls reads assigned to selected taxa from an existing GOTTCHA2 BAM file.
 - `-d/--database` points to either a database prefix, such as `/path/to/db/gottcha_db.species.fna`, or to a directory that contains the matching database files.
 - `-i/--input` supplies one or more read files. Use two files for paired-end Illumina reads and one file for single-end or Nanopore reads.
@@ -244,7 +243,7 @@ The BAM must be coordinate-sorted and indexed. Keep the database path consistent
 
 ### 5) Run the faster prefiltering workflow
 
-Use `fast-profile` when you want to reduce runtime and memory use by preselecting likely references before mapping.
+Use `fast-profile` when you want to reduce runtime and memory usage while producing results comparable to the standard `profile` workflow. It does this by preselecting likely reference sequences before read mapping.
 
 ```bash
 gottcha2 fast-profile \
