@@ -24,8 +24,8 @@ def parse_params(args):
 
     parser.add_argument('-u', '--url', required=False,
                     help='specify a URL to pull from (will override the default)')
-    parser.add_argument('-d', '--database', default='full',
-                    help='specify the type of database to download (full or fast)')
+    parser.add_argument('-d', '--database', default='regular',
+                    help='specify the type of database to download (regular or fast)')
     parser.add_argument('-r', '--rank', default='species',
                     help='taxonomic rank of the database (superkingdom, phylum, class, order, famiily, genus, species)')
     return parser.parse_args(args)
@@ -38,12 +38,12 @@ def download_db(argvs):
     os.mkdir('database')
 
     if not argvs.url:
-        if argvs.database == 'full':
+        if argvs.database == 'regular':
             download_url = GOTTCHA_DB_FULL_LATEST
         elif argvs.database == 'fast':
             download_url = GOTTCHA_DB_FAST_LATEST
         else:
-            sys.exit('Invalid database type specified. Please choose "full" or "fast".')
+            sys.exit('Invalid database type specified. Please choose "regular" or "fast".')
 
     if argvs.url:
         download_url = argvs.url
