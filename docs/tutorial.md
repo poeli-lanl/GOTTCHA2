@@ -31,7 +31,8 @@ GOTTCHA2 is a gene-independent, signature-based metagenomic taxonomic profiler f
 
 Recent GOTTCHA2 releases through v2.4.0 include several workflow changes that are worth knowing before you start:
 
-- **Fast prefiltering mode**: `fast-profile` uses `sylph` to prefilter the reference set before read mapping, which can substantially reduce both runtime and memory usage.
+- **Fast prefiltering mode**: `fast-profile` uses `sylph` to prefilter the reference set before read mapping, often reducing runtime by about 5–10× and memory usage by roughly 2–10×, depending on the sample and database.
+
 - **Current CLI**: the supported entry points are `profile`, `fast-profile`, `extract`, `sam2bam`, `download`, and `version`.
 - **Updated identity handling**: the reported `SNI_SCORE` is based on consensus identity rather than the legacy read-weighted identity metric.
 - **BAM-based workflow**: runs use sorted and indexed BAM for downstream processing instead of keeping SAM as the main intermediate.
