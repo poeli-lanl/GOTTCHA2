@@ -2,7 +2,6 @@ from pathlib import Path
 import re
 import subprocess
 import logging
-import sys
 from typing import List, Tuple
 import pandas as pd
 import logging
