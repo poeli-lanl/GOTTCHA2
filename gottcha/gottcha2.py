@@ -23,13 +23,15 @@ Usage:
     gottcha2 <command> [options]
 
 Commands:
-    profile    Use GOTTCHA2 to profile metagenomic reads against a signature database
+    profile       Use GOTTCHA2 to profile metagenomic reads against a signature database
 
-    extract    Extract reads of a specific taxon from profiled results
+    fast-profile  Faster version of profile that uses a more aggressive prefiltering strategy to speed up the read-mapping process
 
-    sam2bam    Convert GOTTCHA2 SAM to sorted/indexed BAM
+    extract       Extract reads of a specific taxon from profiled results
 
-    version    Display version information
+    sam2bam       Convert GOTTCHA2 SAM to sorted/indexed BAM
+
+    version       Display version information
     
 Examples:
     gottcha2 profile -i reads.fastq -d database/db_prefix
