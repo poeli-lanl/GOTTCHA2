@@ -131,7 +131,7 @@ or
 
 ### Download helper
 
-Use the built-in downloader to fetch the default database tarball into a new `database/` directory. If your installed build does not include this command, download the database bundle manually from the database host instead:
+[Not available yet] Use the built-in downloader to fetch the default database tarball into a new `database/` directory:
 
 ```bash
 gottcha2 download
