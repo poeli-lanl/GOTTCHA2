@@ -337,13 +337,13 @@ If you do not override them explicitly, Nanopore mode uses these defaults:
 - `--matchLength 100`
 - `--errorRate 0.03`
 
-### Accessions of interest
+### Singature of interest
 
-Use `--accList` to provide a text file containing one accession or signature ID per line. This is useful for plasmids, spike-ins, or other targets you want to track during profiling.
+Use `--sigList` to provide a text file containing one accession or signature ID per line. This is useful for plasmids, spike-ins, or other targets you want to track during profiling.
 
-Use `--accListAction` to control how those reads are handled:
+Use `--sigListAction` to control how those reads are handled:
 
-- `report_only` keeps all reads and reports the count in `AOI_READ_COUNT`
+- `report_only` keeps all reads and reports the count in `SOI_READ_COUNT`
 - `filter_out` removes reads matching listed accessions
 - `filter_in` keeps only reads matching listed accessions
 
@@ -529,7 +529,7 @@ The full report (`<prefix>.full.tsv`) contains all computed metrics. The summary
 | REL_ABUNDANCE          | Relative abundance from the field selected by `--relAbu` |
 | PARENT_NAME            | Parent taxon name |
 | PARENT_TAXID           | Parent taxonomy ID |
-| AOI_READ_COUNT         | Reads matched to `--accList` entries |
+| AOI_READ_COUNT         | Reads matched to `--sigList` entries |
 | TOTAL_READ_LEN         | Total aligned read length |
 | TOTAL_BP_MISMATCH      | Total mismatched bases |
 | TOTAL_BP_INDEL         | Total inserted and deleted bases |

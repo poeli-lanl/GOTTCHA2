@@ -149,14 +149,14 @@ def parse_args(ver, args):
     p.add_argument('-nc','--noCutoff', action="store_true",
                     help="Remove all cutoffs applied during the taxonomic profiling stage (alignment thresholds will remain applied). This option is equivalent to use [-Mc 0 -Mr 0 -Ml 0 -Mz 0 -ss 0,0,0]")
 
-    p.add_argument('-a','--accList', metavar='[FILE]', required=False, type=str,
-                    help="A file of list with accession-of-interest (e.g. plasmid accessions).")
+    p.add_argument('-sl','--sigList', metavar='[FILE]', required=False, type=str,
+                    help="A file of list with accession/signature-of-interest (e.g. plasmid accessions).")
 
-    p.add_argument('-aa','--accListAction', choices=['filter_out', 'filter_in', 'report_only'], default='report_only', type=str,
-                    help=("Action for aligned reads mapping to the accession list. "
-                          "'filter_out': discard reads matching accession-of-interest in the list. "
-                          "'filter_in': output only reads matching accession-of-interest in the list. "
-                          "'report_only': do not filter; report reads matching accession-of-interest in the list (AOI_READ_COUNT). "
+    p.add_argument('-sa','--sigListAction', choices=['filter_out', 'filter_in', 'report_only'], default='report_only', type=str,
+                    help=("Action for aligned reads mapping to the accession/signature list. "
+                          "'filter_out': discard reads matching accession/signature-of-interest in the list. "
+                          "'filter_in': output only reads matching accession/signature-of-interest in the list. "
+                          "'report_only': do not filter; report reads matching accession/signature-of-interest in the list (SOI_READ_COUNT). "
                           "[default: report_only]"))
 
     p.add_argument('-er','--errorRate', metavar='<FLOAT>', type=float,
@@ -168,8 +168,8 @@ def parse_args(ver, args):
     p.add_argument('--fast', action="store_true",
                     help="Fast mode")
 
-    p.add_argument('--fast-min-kmer', type=int, default=None,
-                    help="Minimum k-mer size for fast mode. [default: None]")
+    p.add_argument('--fast-min-kmer', type=int, default=10,
+                    help="Minimum k-mer size for fast mode. [default: 10]")
 
     p.add_argument('--mpa', action="store_true",
                     help="Generate output in MetaPhlAn format.")
@@ -254,10 +254,10 @@ def parse_args(ver, args):
         if not Path(args_parsed.bam).is_file():
             p.error(f'BAM file {args_parsed.bam} not found.')
 
-    if args_parsed.accList:
-        if not Path(args_parsed.accList).is_file():
-            p.error(f'Accession exclusion list {args_parsed.accList} not found.')
-        args_parsed.accList = os.path.abspath(args_parsed.accList)
+    if args_parsed.sigList:
+        if not Path(args_parsed.sigList).is_file():
+            p.error(f'Signature-of-interest list {args_parsed.sigList} not found.')
+        args_parsed.sigList = os.path.abspath(args_parsed.sigList)
 
     if args_parsed.nanopore and args_parsed.input and len(args_parsed.input) != 1:
         p.error('--nanopore option requires a single input read file.')
@@ -642,10 +642,10 @@ def main(args):
         print_message(f" - Nanopore Mode      : Enabled",              argvs.silent, begin_t, logfile)
     if argvs.errorRate:
         print_message(f" - Read Error Rate    : {argvs.errorRate}", argvs.silent, begin_t, logfile)
-    if argvs.accList:
-        print_message(f" - AOI List           : {argvs.accList}", argvs.silent, begin_t, logfile)
-    if argvs.accList:
-        print_message(f" - AOI Reads Action   : {argvs.accListAction}", argvs.silent, begin_t, logfile)
+    if argvs.sigList:
+        print_message(f" - Sig-of-Int List    : {argvs.sigList}", argvs.silent, begin_t, logfile)
+    if argvs.sigList:
+        print_message(f" - Sig-of-Int Action  : {argvs.sigListAction}", argvs.silent, begin_t, logfile)
     if argvs.minCov > 0:
         print_message(f" - Minimal SIG Cov    : {argvs.minCov}",      argvs.silent, begin_t, logfile)
     if argvs.minLen > 0:
@@ -691,9 +691,9 @@ def main(args):
         print_message(f" - {df_stats.shape[0]:,} entries loaded.", argvs.silent, begin_t, logfile)
         print_message(f" - signatures at {df_stats['DB_level'].unique().tolist()} levels loaded.", argvs.silent, begin_t, logfile)
 
-    if argvs.accList:
+    if argvs.sigList:
         print_message("Loading accession#s of interest list...", argvs.silent, begin_t, logfile)
-        acc_list = load_acc_list(argvs.accList)
+        acc_list = load_acc_list(argvs.sigList)
         print_message(f" - {len(acc_list):,} accession/signature of interest loaded.", argvs.silent, begin_t, logfile)
 
     # Summary of the Main Process:
@@ -755,7 +755,7 @@ def main(args):
             if match:
                 subsampling_rate = int(match.group(1))
 
-            fast_min_kmer = argvs.fast_min_kmer if argvs.fast_min_kmer else 50
+            fast_min_kmer = argvs.fast_min_kmer
 
             # Run Sylph sketch if the input file is in FASTA format
             if Path(sylph_input[0]).name.endswith(('.fa', '.fasta', '.fa.gz', '.fna', '.fna.gz', '.fasta.gz')):
@@ -811,6 +811,10 @@ def main(args):
             filenames = sig_archive.read_file_list(queried_signatures_file, filename_only=True)
             print_message(f" - Identified {len(filenames):,} reference genomes.", argvs.silent, begin_t, logfile)
             
+            if len(filenames) == 0:
+                print_message("No references identified. GOTTCHA2 stopped.", argvs.silent, begin_t, logfile)
+                sys.exit(0)
+
             # Extract those signatures from the archive to create a smaller reference for read mapping
             extracted_content, processed_files, skipped_files = sig_archive.quick_concat(g2_archive,
                                                                                          separator=str('\n').encode('utf-8'),
@@ -897,7 +901,7 @@ def main(args):
                                                                min_alen=argvs.matchLength,
                                                                split_read_flag=split_read_flag)
 
-            str_df, aoi_read_count = aggregate_results.group_refs_to_strains(ref_chunk_results, acc_list, argvs.accListAction, df_stats)
+            str_df, soi_read_count = aggregate_results.group_refs_to_strains(ref_chunk_results, acc_list, argvs.sigListAction, df_stats)
 
             tol_alignment_count = str_df['READ_COUNT'].sum()
             tol_invalid_match_count = str_df['INVALID_ALNS'].sum()
@@ -921,16 +925,16 @@ def main(args):
                      sni_score_strain,
                      sni_score_cutoff,
                      argvs.errorRate)
-            res_df, aoi_read_count = aggregate_results.aggregate_taxonomy(*_args)
+            res_df, soi_read_count = aggregate_results.aggregate_taxonomy(*_args)
 
             if acc_list:
-                print_message(f" - {aoi_read_count:,} reads mapped to accession-of-interest", argvs.silent, begin_t, logfile)
-                read_count_after_aoi = tol_alignment_count
-                if argvs.accListAction == 'filter_out':
-                    read_count_after_aoi = tol_alignment_count - aoi_read_count
-                elif argvs.accListAction == 'filter_in':
-                    read_count_after_aoi = aoi_read_count
-                print_message(f" - {read_count_after_aoi:,} reads after applying accession-of-interest action ({argvs.accListAction})", argvs.silent, begin_t, logfile)
+                print_message(f" - {soi_read_count:,} reads mapped to accession-of-interest", argvs.silent, begin_t, logfile)
+                read_count_after_soi = tol_alignment_count
+                if argvs.sigListAction == 'filter_out':
+                    read_count_after_soi = tol_alignment_count - soi_read_count
+                elif argvs.sigListAction == 'filter_in':
+                    read_count_after_soi = soi_read_count
+                print_message(f" - {read_count_after_soi:,} reads after applying accession-of-interest action ({argvs.sigListAction})", argvs.silent, begin_t, logfile)
 
             print_message("Done taxonomy aggregation.", argvs.silent, begin_t, logfile)
 
@@ -1004,7 +1008,7 @@ def main(args):
                        argvs.matchLength,
                        max_per_taxon,
                        acc_list,
-                       argvs.accListAction,
+                       argvs.sigListAction,
                        out_format)
             taxon_count, seq_count = extract_reads.extract_sequences_by_taxonomy(*_args)
             print_message(f"Done extracting {seq_count} sequences from {taxon_count} taxa to '{outfile}'.",
