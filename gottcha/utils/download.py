@@ -100,6 +100,5 @@ def main(args):
     argvs = parse_params(args)
     download_db(argvs)
 
-
 if __name__ == '__main__':
     main(sys.argv[1:])
