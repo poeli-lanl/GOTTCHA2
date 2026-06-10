@@ -12,8 +12,6 @@ tested and validated on twenty synthetic and mock datasets ranging in community 
 was applied successfully to data generated from spiked environmental and clinical samples, and robustly
 demonstrates superior performance compared with other available tools.
 
-GOTTCHAv2 is currently under development in BETA stage. Pre-built databases for v1 are incompatible with v2.
-
 -------------------------------------------------------------------
 ## DEPENDENCIES
 

@@ -56,137 +56,288 @@ def parse_args(ver, args):
     Raises:
         SystemExit: If validation fails or --version is specified
     """
-    command = args.pop(0) if args else None
-    p = ap.ArgumentParser(prog=f'gottcha2 {command}', description="""Genomic Origin Through Taxonomic CHAllenge (GOTTCHA) is an annotation-independent, 
-                                 signature-based metagenomic taxonomic profiling tool with substantially low false discovery rates. 
-                                 This Python program maps input reads to precomputed signature databases using minimap2 and profiles the organisms present in a sample. (Version: %s)""" % ver)
+    command = args[0] if args and not args[0].startswith('-') else None
+    parser_args = args[1:] if command else args
+    taxonomic_levels = [
+        'superkingdom', 'phylum', 'class', 'order',
+        'family', 'genus', 'species', 'strain',
+    ]
 
-    eg = p.add_mutually_exclusive_group(required=True)
+    p = ap.ArgumentParser(
+        prog=f'gottcha2 {command}' if command else 'gottcha2 profile',
+        formatter_class=ap.RawTextHelpFormatter,
+        description=(
+            "Genomic Origin Through Taxonomic CHAllenge (GOTTCHA) is an annotation-independent,\n"
+            "signature-based metagenomic taxonomic profiling tool with substantially low false\n"
+            "discovery rates. This command maps input reads to precomputed signature databases\n"
+            f"using minimap2 and profiles the organisms present in a sample. (Version: {ver})"
+        ),
+    )
 
-    eg.add_argument('-i','--input', metavar='[FASTQ]', nargs='+', type=str,
-                    help="Input FASTQ/FASTA file(s). Use space to separate multiple input files.")
+    input_group = p.add_argument_group('Input source')
+    eg = input_group.add_mutually_exclusive_group(required=True)
+    eg.add_argument(
+        '-i', '--input',
+        metavar='FASTQ',
+        nargs='+',
+        type=str,
+        help='Input FASTQ/FASTA file(s). Separate multiple files with spaces.',
+    )
+    eg.add_argument(
+        '-b', '--bam',
+        metavar='BAMFILE',
+        type=str,
+        help='Input sorted and indexed BAM file.',
+    )
 
-    eg.add_argument('-b','--bam', metavar='[BAMFILE]', type=str,
-                    help="Specify the input sorted BAM file (indexed).")
+    database_group = p.add_argument_group('Database')
+    database_group.add_argument(
+        '-d', '--database',
+        metavar='GOTTCHA2_DB',
+        type=str,
+        default=None,
+        help='Path to the GOTTCHA2 database prefix, index file, or database directory.',
+    )
+    database_group.add_argument(
+        '-l', '--dbLevel',
+        metavar='LEVEL',
+        type=str,
+        default='',
+        choices=taxonomic_levels,
+        help=(
+            'Taxonomic level of the input database.\n'
+            'Choices: superkingdom, phylum, class, order, family, genus, species, strain.\n'
+            'Auto-detected when the database prefix contains a rank, e.g. GOTTCHA_db.species.'
+        ),
+    )
 
-    p.add_argument('-d','--database', metavar='[GOTTCHA2_db]', type=str, default=None,
-                    help="The path and prefix of the GOTTCHA2 database.")
+    platform_group = p.add_argument_group('Sequencing and mapping')
+    platform_group.add_argument(
+        '-np', '--nanopore',
+        action='store_true',
+        help=(
+            'Treat input reads as Oxford Nanopore (ONT) reads.\n'
+            'Enables read preprocessing and ONT defaults: -er 0.03 -mi 0.85 -mf 0.85 -mg 100.'
+        ),
+    )
+    platform_group.add_argument(
+        '-xm', '--presetx',
+        metavar='STR',
+        type=str,
+        default='sr',
+        choices=['sr', 'map-pb', 'map-ont'],
+        help='minimap2 preset passed with -x. [default: sr]',
+    )
+    platform_group.add_argument(
+        '--m2options',
+        metavar='STR',
+        type=str,
+        default='auto',
+        help="Additional minimap2 options. Use with care. [default: auto, resolved to '-s120']",
+    )
+    platform_group.add_argument(
+        '-er', '--errorRate',
+        metavar='FLOAT',
+        type=float,
+        help='Estimated sequencing error rate. [default: 0.005, or 0.03 with --nanopore]',
+    )
+    platform_group.add_argument(
+        '-t', '--threads',
+        metavar='INT',
+        type=int,
+        default=1,
+        help='Number of threads. [default: 1]',
+    )
 
-    p.add_argument('-l','--dbLevel', metavar='[LEVEL]', type=str, default='',
-                    choices=['superkingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species', 'strain'],
-                    help="""Specify the taxonomic level of the input database. You can choose one rank from "superkingdom", "phylum", "class", "order", "family", "genus", "species" and "strain". The value will be auto-detected if the input database ended with levels (e.g. GOTTCHA_db.species).""")
+    alignment_group = p.add_argument_group('Alignment thresholds')
+    alignment_group.add_argument(
+        '-mi', '--matchIdentity',
+        metavar='FLOAT',
+        type=float,
+        help='Minimum identity (0.0-1.0) required for a valid match. [default: 0.95, or 0.85 with --nanopore]',
+    )
+    alignment_group.add_argument(
+        '-mf', '--matchFraction',
+        metavar='FLOAT',
+        type=float,
+        help='Minimum aligned fraction (0.0-1.0) of the read or signature fragment. [default: 0.95, or 0.85 with --nanopore]',
+    )
+    alignment_group.add_argument(
+        '-mg', '--matchLength',
+        metavar='INT',
+        type=int,
+        help='Minimum alignment length in bp required for a valid match. [default: 100]',
+    )
 
-    p.add_argument('-np','--nanopore', action="store_true",
-                    help="""Indicate that the input reads are sequenced from Oxford Nanopore (ONT) sequencing platform. This option enables read preprocessing and set "-er 0.03 -mi 0.9 -mf 0.9 -ml 100" by default.""")
+    profiling_group = p.add_argument_group('Profiling thresholds')
+    profiling_group.add_argument(
+        '-ss', '--sniScore',
+        metavar='FLOAT[,FLOAT,FLOAT]',
+        type=str,
+        help=(
+            'Signature nucleotide identity (SNI) thresholds for taxonomic aggregation.\n'
+            'One value applies to all ranks; two values append strain default 0.99;\n'
+            'three values mean other ranks, species, and strain. [default: 0.9,0.95,0.99]'
+        ),
+    )
+    profiling_group.add_argument(
+        '-Mc', '-mc', '--minCov',
+        metavar='FLOAT',
+        type=float,
+        default=0,
+        help='Minimum signature coverage used in abundance calculation. [default: 0]',
+    )
+    profiling_group.add_argument(
+        '-Mr', '-mr', '--minReads',
+        metavar='INT',
+        type=int,
+        default=0,
+        help='Minimum read count used in abundance calculation. [default: 0]',
+    )
+    profiling_group.add_argument(
+        '-Ml', '-ml', '--minLen',
+        metavar='INT',
+        type=int,
+        default=0,
+        help='Minimum signature length used in abundance calculation. [default: 0]',
+    )
+    profiling_group.add_argument(
+        '-Mz', '-mz', '--maxZscore',
+        metavar='FLOAT',
+        type=float,
+        default=0,
+        help='Maximum estimated z-score for mapped-region depths; 0 disables the filter. [default: 0]',
+    )
+    profiling_group.add_argument(
+        '-nc', '--noCutoff',
+        action='store_true',
+        help='Disable profiling-stage cutoffs. Equivalent to -Mc 0 -Mr 0 -Ml 0 -Mz 0 -ss 0,0,0.',
+    )
+    profiling_group.add_argument(
+        '-r', '--relAbu',
+        metavar='FIELD',
+        type=str,
+        default='DEPTH',
+        choices=['DEPTH', 'READ_COUNT', 'GENOMIC_CONTENT_EST'],
+        help='Field used to calculate relative abundance. [default: DEPTH]',
+    )
 
-    p.add_argument('-e', '--extract', metavar='TAXON[,TAXON2,...]', type=str, default=None,
-                    help=(
-                        "Extract mapped reads for specific taxa to a FASTA or FASTQ file.\n"
-                        "You can specify taxa in one of the following ways:\n"
-                        "  - Comma-separated list of taxon IDs:  e.g., -e '1234,5678'\n"
-                        "  - File containing a list of taxon IDs (one per line):  e.g., -e '@taxids.txt'\n"
-                        "  - File with read limits and format: e.g., -e '@taxids.txt:1000:fasta'\n"
-                        "    This limits the number of reads extracted per taxon to <NUMBER> and outputs in <FORMAT> (fasta or fastq).\n"
-                        "  Use 'all' to extract all matching taxa/reads.\n"
-                        "[default: None]"))
+    signature_group = p.add_argument_group('Signature-of-interest filtering')
+    signature_group.add_argument(
+        '-sl', '--sigList',
+        metavar='FILE',
+        type=str,
+        help='File containing accessions/signatures of interest, one per line.',
+    )
+    signature_group.add_argument(
+        '-sa', '--sigListAction',
+        choices=['filter_out', 'filter_in', 'report_only'],
+        default='report_only',
+        type=str,
+        help=(
+            'Action for aligned reads mapped to signatures of interest:\n'
+            '  filter_out  discard matching reads\n'
+            '  filter_in   keep only matching reads\n'
+            '  report_only report matching reads as SOI_READ_COUNT without filtering [default]'
+        ),
+    )
 
-    p.add_argument('-ef', '--extractFullRef', action='store_true',
-                    help=(
-                        "Extract up to 20 sequences per reference from the alignment file and save them to a FASTA file. "
-                        "Equivalent to using: -e 'all:20:fasta'."))
+    extraction_group = p.add_argument_group('Read extraction')
+    extraction_group.add_argument(
+        '-e', '--extract',
+        metavar='TAXON[,TAXON2,...]',
+        type=str,
+        default=None,
+        help=(
+            'Extract mapped reads for specific taxa to FASTA or FASTQ.\n'
+            'Accepted forms:\n'
+            "  1234,5678              comma-separated taxon IDs\n"
+            "  @taxids.txt            one taxon ID per line\n"
+            "  @taxids.txt:1000:fasta limit reads per taxon and choose fasta/fastq\n"
+            "  all                    extract all matching taxa/reads"
+        ),
+    )
+    extraction_group.add_argument(
+        '-ef', '--extractFullRef',
+        action='store_true',
+        help="Extract up to 20 sequences per reference as FASTA. Equivalent to -e 'all:20:fasta'.",
+    )
+    extraction_group.add_argument(
+        '-eo', '--extractOnly',
+        action='store_true',
+        help='Only extract reads from the alignment file; skip profiling.',
+    )
 
-    p.add_argument('-eo', '--extractOnly', action='store_true',
-                    help='While --extract is specified, this option will only extract the reads and not perform any further processing of the alignment file.')
+    output_group = p.add_argument_group('Output')
+    output_group.add_argument(
+        '-fm', '--format',
+        metavar='STR',
+        type=str,
+        default='tsv',
+        choices=['tsv', 'csv', 'biom'],
+        help='Output format. [default: tsv]',
+    )
+    output_group.add_argument(
+        '-o', '--outdir',
+        metavar='DIR',
+        type=str,
+        default='.',
+        help='Output directory. [default: .]',
+    )
+    output_group.add_argument(
+        '-p', '--prefix',
+        metavar='STR',
+        type=str,
+        help='Output file prefix. [default: input file prefix]',
+    )
+    output_group.add_argument(
+        '-c', '--stdout',
+        action='store_true',
+        help='Write the main profile table to standard output.',
+    )
+    output_group.add_argument(
+        '--mpa',
+        action='store_true',
+        help='Generate output in MetaPhlAn format.',
+    )
 
-    p.add_argument('-fm','--format', metavar='[STR]', type=str, default='tsv',
-                    choices=['tsv','csv','biom'],
-                    help='Format of the results; available options include tsv, csv or biom. [default: tsv]')
+    fast_group = p.add_argument_group('Fast profile')
+    fast_group.add_argument(
+        '--fast',
+        action='store_true',
+        help='Enable fast-profile mode.',
+    )
+    fast_group.add_argument(
+        '--fast-min-kmer',
+        metavar='INT',
+        type=int,
+        default=10,
+        help='Minimum k-mer size for fast-profile prefiltering. [default: 10]',
+    )
 
-    p.add_argument('-r','--relAbu', metavar='[FIELD]', type=str, default='DEPTH',
-                    choices=['DEPTH','READ_COUNT','GENOMIC_CONTENT_EST'],
-                    help='The field will be used to calculate relative abundance. You can specify one of the following fields: "DEPTH", "READ_COUNT", "GENOMIC_CONTENT_EST". [default: DEPTH]')
+    logging_group = p.add_argument_group('Logging')
+    logging_group.add_argument(
+        '--silent',
+        action='store_true',
+        help='Disable status messages.',
+    )
+    eg.add_argument(
+        '-v', '--version',
+        action='store_true',
+        help='Print version number and exit.',
+    )
+    logging_group.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Show verbose status messages.',
+    )
+    logging_group.add_argument(
+        '--debug',
+        action='store_true',
+        help='Enable debug logging and keep temporary files.',
+    )
 
-    p.add_argument('-t','--threads', metavar='<INT>', type=int, default=1,
-                    help="Number of threads [default: 1]")
-
-    p.add_argument('-o','--outdir', metavar='[DIR]', type=str, default='.',
-                    help="Output directory [default: .]")
-
-    p.add_argument('-p','--prefix', metavar='<STR>', type=str, required=False,
-                    help="Prefix of the output file [default: <INPUT_FILE_PREFIX>]")
-
-    p.add_argument('-xm','--presetx', metavar='<STR>', type=str, required=False, default='sr',
-                    choices=['sr','map-pb','map-ont'],
-                    help="The preset option (-x) for minimap2. Default value 'sr' for short reads. [default: sr]")
-
-    p.add_argument('--m2options', metavar='<STR>', type=str, required=False, default='auto',
-                    help="The minimap2 mapping options for short reads. Do not use this option unless you know what you are doing. [default: 'auto']")
-
-    p.add_argument('-mi','--matchIdentity', metavar='<FLOAT>', type=float,
-                    help="Minimum identity (0.0-1.0) required for a valid match. [default: 0.95]")
-
-    p.add_argument('-mf','--matchFraction', metavar='<FLOAT>', type=float,
-                    help="Minimum fraction (0.0-1.0) of the read or signature fragment required to be considered a valid match. [default: 0.95]")
-
-    p.add_argument('-mg','--matchLength', metavar='<INT>', type=int,
-                    help="Minimum length (bp) of the alignment required to be considered a valid match. [default: 100]")
-
-    p.add_argument('-ss','--sniScore', metavar='<FLOAT>[,<FLOAT>,<FLOAT>]', type=str,
-                    help="Signature nucleotide identity (SNI) score thresholds for taxonomic aggregation: other levels (first), species level (first value), and strain level (second value); if only one value is provided, all three levels use that value. [default: 0.9,0.95,0.99]")
-
-    p.add_argument('-Mc','-mc','--minCov', metavar='<FLOAT>', type=float, default=0,
-                    help="Minimum signature coverage to be considered valid in abundance calculation. [default: 0]")
-
-    p.add_argument('-Mr','-mr','--minReads', metavar='<INT>', type=int, default=0,
-                    help="Minimum number of reads to be considered valid in abundance calculation. [default: 0]")
-
-    p.add_argument('-Ml','-ml','--minLen', metavar='<INT>', type=int, default=0,
-                    help="Minimum signature length to be considered valid in abundance calculation. [default: 0]")
-
-    p.add_argument('-Mz','-mz','--maxZscore', metavar='<FLOAT>', type=float, default=0,
-                    help="Maximum estimated z-score for the depths of the mapped region. Set to 0 to disable. [default: 0]")
-
-    p.add_argument('-nc','--noCutoff', action="store_true",
-                    help="Remove all cutoffs applied during the taxonomic profiling stage (alignment thresholds will remain applied). This option is equivalent to use [-Mc 0 -Mr 0 -Ml 0 -Mz 0 -ss 0,0,0]")
-
-    p.add_argument('-sl','--sigList', metavar='[FILE]', required=False, type=str,
-                    help="A file of list with accession/signature-of-interest (e.g. plasmid accessions).")
-
-    p.add_argument('-sa','--sigListAction', choices=['filter_out', 'filter_in', 'report_only'], default='report_only', type=str,
-                    help=("Action for aligned reads mapping to the accession/signature list. "
-                          "'filter_out': discard reads matching accession/signature-of-interest in the list. "
-                          "'filter_in': output only reads matching accession/signature-of-interest in the list. "
-                          "'report_only': do not filter; report reads matching accession/signature-of-interest in the list (SOI_READ_COUNT). "
-                          "[default: report_only]"))
-
-    p.add_argument('-er','--errorRate', metavar='<FLOAT>', type=float,
-                    help="Estimated error rate for sequencing data. [default: 0.005]")
-
-    p.add_argument('-c','--stdout', action="store_true",
-                    help="Write on standard output.")
-
-    p.add_argument('--fast', action="store_true",
-                    help="Fast mode")
-
-    p.add_argument('--fast-min-kmer', type=int, default=10,
-                    help="Minimum k-mer size for fast mode. [default: 10]")
-
-    p.add_argument('--mpa', action="store_true",
-                    help="Generate output in MetaPhlAn format.")
-
-    eg.add_argument('-v','--version', action="store_true",
-                    help="Print version number.")
-
-    p.add_argument('--silent', action="store_true",
-                    help="Disable all messages.")
-
-    p.add_argument('--verbose', action="store_true",
-                    help="Provide verbose messages.")
-
-    p.add_argument('--debug', action="store_true",
-                    help="Debug mode. Provide verbose running messages and keep all temporary files.")
-
-    args_parsed = p.parse_args(args)
+    args_parsed = p.parse_args(parser_args)
 
     """
     Checking options

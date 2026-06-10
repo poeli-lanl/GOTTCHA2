@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euxo pipefail
           gottcha2 profile -d gottcha2_database_test/gottcha_db.species.fna -i SRR12689945_1_1k.fastq.gz -mi 0.9 -mf 0.9 -mg 100 -o output
-          gottcha2 profile -d gottcha2_database_test/gottcha_db.species.fna -b output/SRR12689945_1_1k.gottcha_species.bam -sa gottcha2_database_test/aoi_list.txt -o output
+          gottcha2 profile -d gottcha2_database_test/gottcha_db.species.fna -b output/SRR12689945_1_1k.gottcha_species.bam -sl gottcha2_database_test/aoi_list.txt -o output
           grep 'Orthoebolavirus zairense' output/SRR12689945_1_1k.tsv
 
       - name: Run testing dataset - ONT profile tests
