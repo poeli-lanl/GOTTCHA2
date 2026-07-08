@@ -298,7 +298,7 @@ def parse_args(ver, args):
     output_group.add_argument(
         '--mpa',
         action='store_true',
-        help='Generate output in MetaPhlAn format.',
+        help='Generate output in MetaPhlAn format (*.mpa).',
     )
 
     fast_group = p.add_argument_group('Fast profile')
@@ -311,8 +311,8 @@ def parse_args(ver, args):
         '--fast-min-kmer',
         metavar='INT',
         type=int,
-        default=10,
-        help='Minimum k-mer size for fast-profile prefiltering. [default: 10]',
+        default=5,
+        help='Minimum k-mer size for fast-profile prefiltering. [default: 5]',
     )
 
     logging_group = p.add_argument_group('Logging')
@@ -321,11 +321,7 @@ def parse_args(ver, args):
         action='store_true',
         help='Disable status messages.',
     )
-    eg.add_argument(
-        '-v', '--version',
-        action='store_true',
-        help='Print version number and exit.',
-    )
+
     logging_group.add_argument(
         '--verbose',
         action='store_true',
@@ -336,7 +332,12 @@ def parse_args(ver, args):
         action='store_true',
         help='Enable debug logging and keep temporary files.',
     )
-
+    
+    eg.add_argument(
+        '-v', '--version',
+        action='store_true',
+        help='Print version number and exit.',
+    )
     args_parsed = p.parse_args(parser_args)
 
     """

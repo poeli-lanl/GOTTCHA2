@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-bam_cov_mismatch.py
+process_bam.py
 
 Compute per-region coverage and consensus-mismatch metrics from a BAM file
 (with .bai index present), **without** a reference FASTA.
