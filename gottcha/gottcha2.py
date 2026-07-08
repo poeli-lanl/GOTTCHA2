@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-__version__   = "2.4.1"
-__author__    = "Po-E (Paul) Li, Bioscience Division, Los Alamos National Laboratory"
+__version__   = "2.4.2"
+__author__    = "Po-E (Paul) Li, B-GEN, Bioscience Division, Los Alamos National Laboratory"
 __credits__   = ["Po-E Li", "Anna Chernikov"]
 try:
     from .utils import profile
@@ -31,6 +31,8 @@ Commands:
 
     sam2bam       Convert GOTTCHA2 SAM to sorted/indexed BAM
 
+    download      Download the latest GOTTCHA2 database
+
     version       Display version information
     
 Examples:
@@ -39,6 +41,8 @@ Examples:
     gottcha2 fast-profile -i reads.fastq -d database/db_prefix
 
     gottcha2 extract -d prefix.bam -d database/db_prefix -e 666
+
+    gottcha2 download -d fast
 
     gottcha2 sam2bam -i prefix.sam -o prefix.bam
 
