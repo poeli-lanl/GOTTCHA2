@@ -15,9 +15,7 @@ USER $MAMBA_USER
 COPY --chown=$MAMBA_USER:$MAMBA_USER environment.yml /tmp/environment.yml
 
 
-RUN micromamba install -y -n base -f /tmp/environment.yml \
-    --ssl-no-revoke \
-    --ssl-verify=false && \
+RUN micromamba install -y -n base -f /tmp/environment.yml && \
     micromamba clean --all --yes
 
 # Copy project files and install
