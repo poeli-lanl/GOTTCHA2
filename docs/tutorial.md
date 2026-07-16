@@ -96,13 +96,13 @@ A Conda environment file is provided as `environment.yml`.
 
 ### Prebuilt databases
 
-The default download target used by `gottcha2 download` is:
+The database bundles can be downloaded using `gottcha2 download`. The default download target is:
 
 ```text
-https://ref-db.edgebioinformatics.org/gottcha2/latest/gottcha_db.species.tar
+https://ref-db.edgebioinformatics.org/gottcha2/RefSeq-GTDB-multi-domain+/gottcha_db_fast.tar
 ```
 
-You can also download database bundles manually from the same host if you prefer.
+This is the 32 GB prebuilt GOTTCHA2 database for the `gottcha2 fast-profile` mode. If you prefer, you can also download the database bundles manually from the same host. For the standard profiling mode, the 198 GB prebuilt database [`gottcha_db_standard.tar`](https://ref-db.edgebioinformatics.org/gottcha2/RefSeq-GTDB-multi-domain%2B/gottcha_db_standard.tar), is also available for download.
 
 ### Database bundle contents
 

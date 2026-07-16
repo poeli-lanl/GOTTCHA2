@@ -49,7 +49,7 @@ ENV PATH="/opt/conda/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
 # Verify installation
-RUN gottcha2 --version 2>/dev/null || echo "GOTTCHA2 installed"
+RUN gottcha2 version 2>/dev/null || echo "GOTTCHA2 installed"
 
 # Default command
 CMD ["gottcha2", "--help"]
