@@ -43,7 +43,7 @@ GOTTCHA2 profiler is written in Python 3 and uses minimap2 to map reads to signa
 
         (For development installs: `python -m pip install -e .`)
 
-2. Download GOTTCHA2 database bundle (see ):
+2. Download GOTTCHA2 database bundle:
 
         The default database is used for `gottcha2 fast-profile`:
 
