@@ -1106,12 +1106,9 @@ def main(args):
     
     if Path(samfile).is_file():
         print_message("Resolving reciprocal relationships from SAM file...", argvs.silent, begin_t, logfile)
-        reciprocal_groups = reciprocal_graph.reciprocal_relationships_from_sam(samfile)
+        reciprocal_groups = reciprocal_graph.reciprocal_relationships_from_sam(samfile, min_alen=argvs.matchLength)
         tol_reciprocal_groups = len(reciprocal_groups)
         print_message(f" - {tol_reciprocal_groups:,} reciprocal groups identified", argvs.silent, begin_t, logfile)
-        if tol_reciprocal_groups == 0:
-            print_message("No reciprocal groups identified from the SAM file. Stopping.", argvs.silent, begin_t, logfile)
-            sys.exit(0)
         gc.collect()
 
     # processing alignments and generate results
