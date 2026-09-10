@@ -130,28 +130,27 @@ def parse_args(ver, args):
         ),
     )
     platform_group.add_argument(
-        '--ont-max-secondary', type=int, default=30,
-        help='Maximum minimap2 secondary candidates per primary in --ont-direct mode. [default: 30]',
-    )
-    platform_group.add_argument(
-        '--ont-secondary-ratio', type=float, default=0.5,
-        help='Minimum minimap2 secondary/primary chaining-score ratio (-p) in --ont-direct mode. [default: 0.5]',
-    )
-    platform_group.add_argument(
-        '--ont-min-species-support',
-        dest='ont_min_species_support', type=float, default=0.6,
-        help='Minimum fraction of competing union-bp support required by the winning species. [default: 0.6]',
-    )
-    platform_group.add_argument(
         '-xm', '--presetx',
         metavar='STR',
         type=str,
         default=None,
         choices=['sr', 'map-pb', 'map-ont', 'lr:hq'],
-        help='minimap2 preset passed with -x. [default: lr:hq for --nanopore --ont-direct; sr otherwise]',
+        help='minimap2 preset passed with -x. [default: lr:hq for --nanopore; sr otherwise]',
     )
     platform_group.add_argument(
-        '--m2options',
+        '--no-secondary', action='store_true',
+        help='Disable minimap2 secondary candidates. [default is allowed]',
+    )
+    platform_group.add_argument(
+        '--max-secondary', type=int, default=10,
+        help='Maximum minimap2 secondary candidates per primary alignment. [default: 10]',
+    )
+    platform_group.add_argument(
+        '--secondary-ratio', type=float, default=0.95,
+        help='Minimum minimap2 secondary/primary chaining-score ratio. [default: 0.95]',
+    )
+    platform_group.add_argument(
+        '--m2-options',
         metavar='STR',
         type=str,
         default='auto',
@@ -522,27 +521,26 @@ def parse_args(ver, args):
 
     if args_parsed.ont_chunk and not args_parsed.nanopore:
         p.error('--ont-chunk requires --nanopore.')
-    if args_parsed.nanopore and not args_parsed.ont_chunk:
-        if args_parsed.ont_max_secondary < 0:
-            p.error('--ont-max-secondary must be >= 0.')
-        if not 0 <= args_parsed.ont_secondary_ratio <= 1:
-            p.error('--ont-secondary-ratio must be between 0 and 1.')
-        if not 0 <= args_parsed.ont_min_species_support <= 1:
-            p.error('--ont-min-species-support must be between 0 and 1.')
+
+    if args_parsed.max_secondary < 0:
+        p.error('--max-secondary must be >= 0.')
+
+    if not 0 <= args_parsed.secondary_ratio <= 1:
+        p.error('--secondary-ratio must be between 0 and 1.')
 
     if args_parsed.presetx is None:
         args_parsed.presetx = 'lr:hq' if (args_parsed.nanopore and not args_parsed.ont_chunk) else 'sr'
 
-    if args_parsed.m2options == 'auto':
+    if args_parsed.m2_options == 'auto':
         if args_parsed.nanopore and not args_parsed.ont_chunk:
             # Fast mode builds the signature index on the fly and adds k24/w12
             # below, so two minimizers are a useful short-fragment safeguard.
             # Prebuilt GOTTCHA2 .mmi indexes retain k28/w24; allow one seed to
             # initiate DP for ~100-bp signatures.
             seed_chain = '-n2' if args_parsed.fast else '-n1'
-            args_parsed.m2options = f'{seed_chain} -m25 -s100 --no-long-join'
+            args_parsed.m2_options = f'{seed_chain} -m25 -s100 --no-long-join'
         else:
-            args_parsed.m2options = '-s120'
+            args_parsed.m2_options = '-s120'
 
     if args_parsed.noCutoff:
         args_parsed.sniScore = '0,0,0'
@@ -749,6 +747,7 @@ def main(args):
     multi_part_index_flag = False
     res_df = pd.DataFrame() # aggregated restuls
     logfile_prev = ""
+    reciprocal_groups = {}
 
     logging_level = logging.WARNING
 
@@ -938,9 +937,9 @@ def main(args):
         if argvs.nanopore:
             print_message("Checking nanopore read files...", argvs.silent, begin_t, logfile)
             if direct_ont_flag:
-                print_message(" - ONT mode: direct mapping intact reads", argvs.silent, begin_t, logfile)
+                print_message(" - Direct mapping ONT reads", argvs.silent, begin_t, logfile)
             else:
-                print_message(" - ONT mode: splitting reads to chunks", argvs.silent, begin_t, logfile)
+                print_message(" - Splitting ONT reads to chunks", argvs.silent, begin_t, logfile)
                 argvs.input = ont_utils.preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
                 split_read_flag = True
 
@@ -1046,13 +1045,13 @@ def main(args):
             argvs.input,
             minimap2_index,
             argvs.threads,
-            argvs.m2options,
+            argvs.m2_options,
             argvs.presetx,
             samfile,
             logfile,
-            allow_secondary=direct_ont_flag,
-            max_secondary=argvs.ont_max_secondary,
-            secondary_ratio=argvs.ont_secondary_ratio,
+            allow_secondary=(not argvs.no_secondary),
+            max_secondary=argvs.max_secondary,
+            secondary_ratio=argvs.secondary_ratio,
         )
         logging.info(f"COMMAND: {cmd}")
 
@@ -1107,6 +1106,12 @@ def main(args):
     if Path(samfile).is_file():
         print_message("Resolving reciprocal relationships from SAM file...", argvs.silent, begin_t, logfile)
         reciprocal_groups = reciprocal_graph.reciprocal_relationships_from_sam(samfile, min_alen=argvs.matchLength)
+
+        for group in reciprocal_groups:
+            logging.debug(f"{group}:")
+            for species_taxid in reciprocal_groups[group]:
+                logging.debug(f" - {taxonomy.taxid2name(species_taxid)} ({species_taxid}); g__{taxonomy.taxid2nameOnRank(species_taxid, "genus")}")
+
         tol_reciprocal_groups = len(reciprocal_groups)
         print_message(f" - {tol_reciprocal_groups:,} reciprocal groups identified", argvs.silent, begin_t, logfile)
         gc.collect()
@@ -1134,8 +1139,8 @@ def main(args):
                 min_frac=argvs.matchFraction,
                 min_idt=argvs.matchIdentity,
                 min_alen=argvs.matchLength,
-                include_secondary=True,
-                include_supplementary=True,
+                include_secondary=not argvs.no_secondary,
+                include_supplementary=not argvs.no_secondary,
                 split_read_flag=split_read_flag
             )
 

@@ -76,6 +76,81 @@ def _init_worker(
     }
 
 
+def _is_aln_valid(aln, rname, start0) -> Tuple[bool, Optional[str]]:
+    global _CFG, _BAM
+    min_mapq = _CFG["min_mapq"]
+    min_frac = _CFG["min_frac"]
+    min_idt = _CFG["min_idt"]
+    inc_sec = _CFG["include_secondary"]
+    inc_sup = _CFG["include_supplementary"]
+    inc_dup = _CFG["include_duplicates"]
+    inc_qcf = _CFG["include_qcfail"]
+    min_alen = _CFG["min_alen"]
+    bam = _BAM
+
+    if aln.is_unmapped:
+        return False, "aln_type"
+    if (not inc_sec) and aln.is_secondary:
+        return False, "aln_type"
+    if (not inc_sup) and aln.is_supplementary:
+        return False, "aln_type"
+    if (not inc_dup) and aln.is_duplicate:
+        return False, "aln_type"
+    if (not inc_qcf) and aln.is_qcfail:
+        return False, "aln_type"
+    if aln.mapping_quality < min_mapq:
+        return False, "aln_quality"
+
+    if aln.reference_start < start0:
+        return False, "aln_position"
+
+    # Note: aln.reference_start is 0-based leftmost coordinate of the alignment on the reference.
+    # Only count reads that have their aligned portion starting within the chunk towards numreads, to avoid double-counting reads that span multiple chunks.
+    if min_idt > 0.0 and aln.has_tag('de'):
+        mm_idt = 1-aln.get_tag('de')
+        if min_idt > mm_idt:
+            return False, "aln_quality"
+
+    if min_frac > 0.0:
+        if aln.query_length <= 0:
+            #for hard clips, query_length can be 0, recover it from CIGAR
+            query_length = sum(length for op, length in aln.cigartuples if op in (0, 1, 4, 5, 7, 8)) # M/I/S/H/=/X
+        else:
+            query_length = aln.query_length
+
+        if (aln.alen / query_length) < min_frac and (aln.alen / bam.get_reference_length(rname)) < min_frac:
+            return False, "aln_quality"
+
+    if min_alen > 0 and aln.alen < min_alen:
+        return False, "aln_quality"
+
+    return True, None
+
+def _is_pair_owner(aln):
+    """Return True for exactly one alignment of a mapped pair."""
+    if not aln.is_paired:
+        return True
+
+    if aln.mate_is_unmapped:
+        return True
+
+    # Canonical location for current alignment
+    this_key = (
+        aln.reference_id,
+        aln.reference_start,
+        0 if aln.is_read1 else 1,
+    )
+
+    # Canonical location for mate
+    mate_key = (
+        aln.next_reference_id,
+        aln.next_reference_start,
+        1 if aln.is_read1 else 0,
+    )
+
+    return this_key < mate_key
+
+
 def _process_chunk(task: Tuple[str, int, int]) -> List:
     """
     Process one (rname, start0, end0) chunk.
@@ -97,15 +172,6 @@ def _process_chunk(task: Tuple[str, int, int]) -> List:
     # mm[pos] = #reads with CIGAR X at that position
     depth_diff = np.zeros(L + 1, dtype=np.int32)
     mm_diff = np.zeros(L + 1, dtype=np.int32)
-
-    min_mapq = _CFG["min_mapq"]
-    min_frac = _CFG["min_frac"]
-    min_idt = _CFG["min_idt"]
-    inc_sec = _CFG["include_secondary"]
-    inc_sup = _CFG["include_supplementary"]
-    inc_dup = _CFG["include_duplicates"]
-    inc_qcf = _CFG["include_qcfail"]
-    min_alen = _CFG["min_alen"]
     split_read_flag = _CFG["split_read_flag"]
 
     numreads = 0
@@ -116,57 +182,24 @@ def _process_chunk(task: Tuple[str, int, int]) -> List:
 
     # Iterate reads overlapping this region.
     for aln in bam.fetch(rname, start0, end0):
-        # Basic filters
-        if aln.is_unmapped:
-            continue
-        if (not inc_sec) and aln.is_secondary:
-            continue
-        if (not inc_sup) and aln.is_supplementary:
-            continue
-        if (not inc_dup) and aln.is_duplicate:
-            continue
-        if (not inc_qcf) and aln.is_qcfail:
-            continue
-        if aln.mapping_quality < min_mapq:
+        valid, reason = _is_aln_valid(aln, rname, start0)
+        if not valid:
+            invalid_alns += 1
             continue
 
-        # Note: aln.reference_start is 0-based leftmost coordinate of the alignment on the reference.
-        # Only count reads that have their aligned portion starting within the chunk towards numreads, to avoid double-counting reads that span multiple chunks.
-        if aln.reference_start >= start0:
-
-            if min_idt > 0.0 and aln.has_tag('NM'):
-                mm_idt = (1-aln.get_tag('NM')/aln.alen)
-                if min_idt > mm_idt:
-                    invalid_alns += 1
-                    continue
-
-            if min_frac > 0.0:
-                if aln.query_length <= 0:
-                    #for hard clips, query_length can be 0, recover it from CIGAR
-                    query_length = sum(length for op, length in aln.cigartuples if op in (0, 1, 4, 5, 7, 8)) # M/I/S/H/=/X
-                else:
-                    query_length = aln.query_length
-
-                if (aln.alen / query_length) < min_frac and (aln.alen / bam.get_reference_length(rname)) < min_frac:
-                    invalid_alns += 1
-                    continue
-
-            if min_alen > 0 and aln.alen < min_alen:
-                invalid_alns += 1
-                continue
-
-            # If split_read_flag is set, only count reads with ZC tag (the first chunked reads) towards numreads.
-            if split_read_flag:
-                if aln.has_tag('ZC'):
-                    numreads += 1
-            else:
-                if aln.is_secondary or aln.is_supplementary:
-                    pass
-                else:
-                    numreads += 1
-            
-            # count total read length (including softclips) for mean depth calculation
-            readlength += aln.alen
+        # Count valid reads
+        # If split_read_flag is set, only count reads with ZC tag (the first chunked reads) towards numreads.
+        if split_read_flag:
+            if aln.has_tag('ZC'):
+                numreads += 1
+        else:
+            if aln.is_secondary or aln.is_supplementary:
+                pass
+            elif _is_pair_owner(aln):
+                numreads += 1
+        
+        # count total read length (including softclips) for mean depth calculation
+        readlength += aln.alen
 
         cig = aln.cigartuples
         if not cig:
