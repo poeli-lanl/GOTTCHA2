@@ -230,7 +230,7 @@ def convert_sam_to_bam(
         #
         # This avoids:
         #   samtools view -b -> temp.bam -> samtools sort
-        logging.info("Sorting directly from SAM to BAM...")
+        logging.info("Sorting SAM to BAM...")
 
         cat_cmd = ["cat", header_file, input_sam]
         sort_cmd = ["samtools", "sort", 

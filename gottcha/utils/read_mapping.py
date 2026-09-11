@@ -31,8 +31,9 @@ def minimap2(
     mapped_re = re.compile(r"mapped (\d+) sequences")
     multi_part_index_flag = False
     input_read_count = 0
+    opts = mm_options.split()
 
-    opts = ["-x", presetx, "-a", "--eqx", "--sam-hit-only"]
+    opts.extend(["-x", presetx, "-a", "--eqx", "--sam-hit-only"])
 
     if allow_secondary:
         opts.extend(["--secondary=yes", f"-N{max_secondary}", f"-p{secondary_ratio}"])

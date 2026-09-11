@@ -538,7 +538,7 @@ def parse_args(ver, args):
             # Prebuilt GOTTCHA2 .mmi indexes retain k28/w24; allow one seed to
             # initiate DP for ~100-bp signatures.
             seed_chain = '-n2' if args_parsed.fast else '-n1'
-            args_parsed.m2_options = f'{seed_chain} -m25 -s100 --no-long-join'
+            args_parsed.m2_options = f'{seed_chain} -m25 -s120 --no-long-join'
         else:
             args_parsed.m2_options = '-s120'
 
