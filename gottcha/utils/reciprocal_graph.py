@@ -9,6 +9,7 @@ from scipy.sparse import coo_matrix, triu
 from scipy.sparse.csgraph import connected_components
 from . import taxonomy as t
 
+
 def _wilson_lower_bound(
     successes: np.ndarray,
     trials: np.ndarray,
@@ -313,6 +314,7 @@ def get_species_hit_groups(
         return groups, edge_table
     return groups
 
+
 def reciprocal_relationships_from_sam(samfile: Path, min_alen: int) -> dict:
     """
     Extract reciprocal relationships from a SAM file.
@@ -339,8 +341,12 @@ def reciprocal_relationships_from_sam(samfile: Path, min_alen: int) -> dict:
         }
     )
     df[['AS']] = df[['AS']].astype('int16')
-
     logging.debug(f'Loaded SAM file with {len(df)} alignments.')
+
+    # Filter alignments based on minimum identity and minimum alignment length.
+    logging.info(f'Filtering out alignments not meeting alignment criteria...')
+    df = df[df['AS'] > min_alen*2]
+    logging.debug(f'Filtered SAM file to {len(df)} alignments meeting min_alen criteria.')
 
     logging.info(f'Identifying reads having >1 distinct species....')
     taxids = df["REF"].str.rsplit("|", n=2).str[-2]
@@ -363,11 +369,6 @@ def reciprocal_relationships_from_sam(samfile: Path, min_alen: int) -> dict:
     )
     df = df.loc[mask].reset_index(drop=True)
     logging.debug(f'Filtered SAM file to {len(df)} alignments with reads having >1 distinct species.')
-
-    # Filter alignments based on minimum identity and minimum alignment length.
-    logging.info(f'Filtering out alignments not meeting alignment criteria...')
-    df = df[df['AS'] > min_alen*2]
-    logging.debug(f'Filtered SAM file to {len(df)} alignments meeting min_alen criteria.')
 
     logging.info(f'Grouping species using reciprocal directed read-mapping relationships...')
     # Extract taxids from the REF column and map them to species and genus taxids.
