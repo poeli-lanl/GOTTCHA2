@@ -138,8 +138,8 @@ def parse_args(ver, args):
         help='minimap2 preset passed with -x. [default: lr:hq for --nanopore; sr otherwise]',
     )
     platform_group.add_argument(
-        '--no-secondary', action='store_true',
-        help='Disable minimap2 secondary candidates. [default is allowed]',
+        '--secondary', choices=['yes', 'no'], default='no',
+        help='Allow minimap2 secondary candidates. [default: no]',
     )
     platform_group.add_argument(
         '--max-secondary', type=int, default=10,
@@ -241,6 +241,12 @@ def parse_args(ver, args):
         default='DEPTH',
         choices=['DEPTH', 'READ_COUNT', 'GENOMIC_CONTENT_EST'],
         help='Field used to calculate relative abundance. [default: DEPTH]',
+    )
+    profiling_group.add_argument(
+        '--reciprocal-groups',
+        choices=['yes', 'no'], 
+        default='no',
+        help='(EXPERIMENTAL) Enable or disable reciprocal groups. [default: no]',
     )
 
     signature_group = p.add_argument_group('Signature-of-interest filtering')
@@ -1049,7 +1055,7 @@ def main(args):
             argvs.presetx,
             samfile,
             logfile,
-            allow_secondary=(not argvs.no_secondary),
+            allow_secondary=(argvs.secondary == 'yes'),
             max_secondary=argvs.max_secondary,
             secondary_ratio=argvs.secondary_ratio,
         )
@@ -1103,7 +1109,7 @@ def main(args):
     #     gc.collect()
     # preprocess SAM file for nanopore reads
     
-    if Path(samfile).is_file():
+    if Path(samfile).is_file() and argvs.reciprocal_groups == 'yes':
         print_message("Resolving reciprocal relationships from SAM file...", argvs.silent, begin_t, logfile)
         reciprocal_groups = reciprocal_graph.reciprocal_relationships_from_sam(samfile, min_alen=argvs.matchLength)
 
@@ -1139,8 +1145,8 @@ def main(args):
                 min_frac=argvs.matchFraction,
                 min_idt=argvs.matchIdentity,
                 min_alen=argvs.matchLength,
-                include_secondary=not argvs.no_secondary,
-                include_supplementary=not argvs.no_secondary,
+                include_secondary=(argvs.secondary == 'yes'),
+                include_supplementary=(argvs.secondary == 'yes'),
                 split_read_flag=split_read_flag
             )
 

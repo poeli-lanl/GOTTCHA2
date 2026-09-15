@@ -442,15 +442,16 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
                 if len(members) < 2:
                     continue
 
-                # representative = most abundant qualified species
-                rep_idx = members[abu_col].idxmax()
+                # representative = most primary reads qualified species
+                rep_col = 'READ_COUNT'
+                rep_idx = members[rep_col].idxmax()
                 rep = lvl_df.loc[rep_idx].copy()
 
-                group_abundance = members[abu_col].sum()
+                group_abundance = members[rep_col].sum()
 
                 fractions = []
-                for _, row in members.sort_values(abu_col, ascending=False).iterrows():
-                    frac = row[abu_col]/group_abundance if group_abundance > 0 else 0
+                for _, row in members.sort_values(rep_col, ascending=False).iterrows():
+                    frac = row[rep_col]/group_abundance if group_abundance > 0 else 0
                     fractions.append(
                         f"{row['LVL_NAME']} (taxid={row['LVL_TAXID']}): {frac:.4f}"
                     )

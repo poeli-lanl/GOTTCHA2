@@ -30,6 +30,43 @@ class TestProfileUtils(unittest.TestCase):
             self.assertEqual(args.errorRate, 0.005)
             self.assertEqual(args.prefix, "reads")
             self.assertEqual(args.input[0], os.path.abspath(read_path))
+            self.assertEqual(args.secondary, "yes")
+
+    def test_parse_args_secondary_choices(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_prefix = os.path.join(tmp, "gottcha_db.species")
+            read_path = os.path.join(tmp, "reads.fastq")
+            open(db_prefix + ".mmi", "w").close()
+            open(db_prefix + ".tax.tsv", "w").close()
+            open(db_prefix + ".stats", "w").close()
+            open(read_path, "w").close()
+
+            for secondary in ("yes", "no"):
+                with self.subTest(secondary=secondary):
+                    args = profile.parse_args(
+                        "test",
+                        ["profile", "-i", read_path, "-d", db_prefix,
+                         "--secondary", secondary],
+                    )
+
+                    self.assertEqual(args.secondary, secondary)
+
+    def test_parse_args_rejects_invalid_secondary_options(self):
+        cases = (
+            (["--secondary", "true"], "invalid choice"),
+            (["--secondary"], "expected one argument"),
+            (["--no-secondary"], "unrecognized arguments: --no-secondary"),
+        )
+        for options, message in cases:
+            with self.subTest(options=options):
+                stderr = io.StringIO()
+                with redirect_stderr(stderr), self.assertRaises(SystemExit) as error:
+                    profile.parse_args(
+                        "test", ["profile", "-i", "reads.fastq", "-d", "db.species"] + options,
+                    )
+
+                self.assertEqual(error.exception.code, 2)
+                self.assertIn(message, stderr.getvalue())
 
     def test_parse_args_nanopore_defaults_to_direct_mapping(self):
         with tempfile.TemporaryDirectory() as tmp:
