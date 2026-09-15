@@ -22,7 +22,7 @@ def generate_report_file(rep_df: pd.DataFrame, o: str, fullreport_o: str, fmt: s
     # Fields for full mode
     cols = [# summary 1-11
             'LEVEL', 'NAME', 'TAXID', 'READ_COUNT', 'TOTAL_BP_MAPPED',
-            'SNI_SCORE', 'COVERED_SIG_LEN', 'BEST_SIG_COV', 'DEPTH', 'REL_ABUNDANCE_GC',
+            'SNI_SCORE', 'COVERED_SIG_LEN', 'SIG_COV', 'DEPTH', 'REL_ABUNDANCE_GC',
             'REL_ABUNDANCE',
             # parents 12-13
             'PARENT_NAME', 'PARENT_TAXID',
