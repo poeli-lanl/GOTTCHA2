@@ -1116,7 +1116,7 @@ def main(args):
         for group in reciprocal_groups:
             logging.debug(f"{group}:")
             for species_taxid in reciprocal_groups[group]:
-                logging.debug(f" - {taxonomy.taxid2name(species_taxid)} ({species_taxid}); g__{taxonomy.taxid2nameOnRank(species_taxid, "genus")}")
+                logging.debug(f" - {taxonomy.taxid2name(species_taxid)} ({species_taxid}); g__{taxonomy.taxid2nameOnRank(species_taxid, 'genus')}")
 
         tol_reciprocal_groups = len(reciprocal_groups)
         print_message(f" - {tol_reciprocal_groups:,} reciprocal groups identified", argvs.silent, begin_t, logfile)
