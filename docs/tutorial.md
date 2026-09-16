@@ -22,6 +22,7 @@ GOTTCHA2 is a gene-independent, signature-based metagenomic taxonomic profiler f
 - [Output files](#output-files)
 - [Thresholds and filtering](#thresholds-and-filtering)
 - [Full report fields](#full-report-fields)
+- [Running unit tests](#running-unit-tests)
 - [Troubleshooting](#troubleshooting)
 - [License and citation](#license-and-citation)
 
@@ -29,13 +30,12 @@ GOTTCHA2 is a gene-independent, signature-based metagenomic taxonomic profiler f
 
 ## What's new
 
-Recent GOTTCHA2 releases through v2.4.0 include several workflow changes that are worth knowing before you start:
+The current development version is v2.5.0. It includes several workflow changes that are worth knowing before you start:
 
-- **Fast prefiltering mode**: `fast-profile` uses `sylph` to prefilter the reference set before read mapping while producing results comparable to the standard `profile` workflow. Depending on the sample and database, it often reduces runtime by about 5–10× and memory usage by roughly 2–10×.
-- **Current CLI**: the supported entry points are `profile`, `fast-profile`, `extract`, `sam2bam`, `download`, and `version`.
-- **Updated identity handling**: the reported `SNI_SCORE` is based on consensus identity rather than the legacy read-weighted identity metric.
-- **BAM-based workflow**: runs use sorted and indexed BAM for downstream processing instead of keeping SAM as the main intermediate.
-- **Legacy compatibility**: the older `gottcha2.py` workflow (SAM-based) is still available for compatibility, but it is frozen at v2.2.3.
+- **Direct Oxford Nanopore profiling**: `-np/--nanopore` maps intact ONT reads by default. The earlier 150 bp chunk workflow remains available with `--ont-chunk`.
+- **Shared mapping controls**: `--secondary yes|no`, `--max-secondary`, `--secondary-ratio`, and `--m2-options` apply to short reads and both ONT workflows. Secondary candidates are disabled by default.
+- **Updated identity and coverage reporting**: `SNI_SCORE` uses consensus differences, sequencing error, and covered signature space. Species with both species-level and strain-level signatures combine their evidence before SNI estimation. Reports distinguish `ALN_IDENTITY`, `CONSENSUS_SEQ_IDENTITY`, `SIG_COV`, and `SIG_COV_RAW`.
+- **Experimental reciprocal groups**: `--reciprocal-groups yes` enables grouping based on reciprocal species mappings. It is disabled by default and does not enable secondary candidates automatically.
 
 ---
 
@@ -80,9 +80,9 @@ GOTTCHA2 requires Python 3.9+.
 
 Runtime dependencies:
 
-- `minimap2` for mapping
+- `minimap2` 2.27 or newer for mapping
 - `samtools` and `pysam` for BAM conversion and parsing
-- `numpy` and `pandas`
+- `numpy`, `pandas`, and `scipy`
 - `requests`
 - `tqdm`
 - `biom-format` if you use `--format biom`
@@ -112,10 +112,12 @@ A standard profiling database should include these files with the same prefix:
 - `gottcha_db.<level>.fna.tax.tsv` taxonomy mapping
 - `gottcha_db.<level>.fna.stats` signature and genome statistics
 
-Additional files used by fast mode:
+Fast mode uses the shared `.tax.tsv` and `.stats` files above together with:
 
 - `gottcha_db.<level>.fna.syldb` `sylph` database for prefiltering
 - `gottcha_db.<level>.fna.zip` archived signature sequences used to build the reduced reference
+
+The `.mmi` index is required by `profile` but is not used by `fast-profile`.
 
 Pass either the shared database prefix or the database directory to `-d/--database`. GOTTCHA2 locates the required sidecar files from that path. For example:
 
@@ -131,11 +133,19 @@ or
 
 ### Download helper
 
-[Not available yet] Use the built-in downloader to fetch the default database tarball into a new `database/` directory:
+Use the built-in downloader to fetch and verify a database tarball, then extract it into a new `database/` directory. Fast mode is the default download:
 
 ```bash
 gottcha2 download
 ```
+
+Download the larger standard database instead with:
+
+```bash
+gottcha2 download -d standard
+```
+
+The downloader stops if a `database/` directory already exists in the current working directory. It verifies the archive against the published SHA-256 checksum before extraction.
 
 See available options with:
 
@@ -152,11 +162,13 @@ These examples use the most common workflows. Replace the example paths and file
 ### Example conventions
 
 - `gottcha2 profile` maps reads to the selected signature database and produces taxonomic reports.
-- `gottcha2 fast-profile` first narrow the reference set, then runs the profiling workflow on the reduced reference.
+- `gottcha2 fast-profile` first narrows the reference set, then runs the profiling workflow on the reduced reference.
 - `gottcha2 extract` pulls reads assigned to selected taxa from an existing GOTTCHA2 BAM file.
 - `-d/--database` points to either a database prefix, such as `/path/to/db/gottcha_db.species.fna`, or to a directory that contains the matching database files.
 - `-i/--input` supplies one or more read files. Use two files for paired-end Illumina reads and one file for single-end or Nanopore reads.
 - `-b/--bam` reuses an existing sorted and indexed BAM instead of remapping reads.
+- `-np/--nanopore` enables ONT mode and maps intact long reads by default.
+- `--ont-chunk`, used together with `-np`, selects the earlier 150 bp chunk workflow.
 - `-t/--threads` controls the number of CPU threads used by mapping and related processing steps.
 - `-o/--outdir` chooses the output directory. GOTTCHA2 creates it if needed.
 - `-p/--prefix` sets the output filename prefix. If you omit it, GOTTCHA2 derives a prefix from the input filename or BAM name.
@@ -201,19 +213,31 @@ Because `-p/--prefix` is omitted, GOTTCHA2 derives the output prefix from `sampl
 
 ### 3) Profile Oxford Nanopore reads
 
-Nanopore mode expects exactly one input file. Add `--nanopore` so GOTTCHA2 uses long-read preprocessing and Nanopore-oriented default thresholds.
+Nanopore mode expects exactly one input file. Add `-np` (short for `--nanopore`) so GOTTCHA2 maps the intact long reads with ONT-oriented settings.
 
 ```bash
 gottcha2 profile \
   -d /path/to/db/gottcha_db.species.fna \
   -i ont_reads.fastq.gz \
-  --nanopore \
+  -np \
   -t 8 \
   -o out \
   -p ont_sample
 ```
 
-The important difference from short-read mode is `--nanopore`. In this mode, GOTTCHA2 chunks long reads before mapping and uses more permissive default alignment and error-rate settings. See [Oxford Nanopore mode](#oxford-nanopore-mode) for details.
+By default, `-np` uses direct ONT mode with the `lr:hq` minimap2 preset and secondary candidates disabled. To use the earlier chunk-based workflow instead, add `--ont-chunk`:
+
+```bash
+gottcha2 profile \
+  -d /path/to/db/gottcha_db.species.fna \
+  -i ont_reads.fastq.gz \
+  -np --ont-chunk \
+  -t 8 \
+  -o out \
+  -p ont_sample.chunk
+```
+
+See [Oxford Nanopore mode](#oxford-nanopore-mode) for the different defaults and tuning options.
 
 ### 4) Re-run profiling from an existing BAM
 
@@ -254,7 +278,7 @@ gottcha2 fast-profile \
   -p sample.fast
 ```
 
-This command requires the standard database files plus fast-mode sidecars: `.syldb` and `.zip`. The outputs have the same general structure as `profile`, but mapping is performed against a reduced reference set selected by `sylph`.
+This command requires the fast-mode `.syldb` and `.zip` files plus the shared `.tax.tsv` and `.stats` files. It does not use the standard `.mmi` index. The outputs have the same general structure as `profile`, but mapping is performed against a reduced reference set selected by `sylph`.
 
 ### 6) Extract reads for a taxon from an existing BAM
 
@@ -285,7 +309,7 @@ column -t -s $'\t' out/sample.tsv | less -S
 column -t -s $'\t' out/sample.full.tsv | less -S
 ```
 
-The summary report (`*.tsv`, `*.csv`, or `*.biom`) contains taxa that passed the selected filters. The full report (`*.full.tsv`) includes both passing and filtered taxa and records filtering reasons in the `NOTE` column.
+The TSV/CSV summary contains qualified rows across taxonomic ranks. The BIOM report contains the database rank selected with `--dbLevel`. TSV/CSV runs also write a full report (`*.full.tsv`) containing passing, filtered, and hidden rows, with reasons in the `NOTE` column.
 
 ---
 
@@ -321,29 +345,82 @@ gottcha2 extract --help
 
 GOTTCHA2 profiles metagenomic samples by mapping sequencing reads directly to taxon-specific signature fragments. GOTTCHA2 consolidates alignments across each genome's signature space to compute coverage and depth statistics, then derives an ANI-like metric called the signature nucleotide identity score (`SNI_SCORE`). Genome-level results are subsequently aggregated to higher taxonomic ranks.
 
+`SNI_SCORE` is the center of a coverage-adjusted Wilson interval, using consensus differences after subtracting the estimated sequencing error rate. It is not identical to raw alignment identity. Sparse signature coverage widens `SNI_CI95_LH` and affects the score.
+
+At the species rank, evidence from species-level and strain-level signatures is combined before estimating SNI. If only strain-level signatures have mapped reads, the species calculation also includes the representative species signature length from the database statistics. Other rollups retain the best constituent SNI score and its confidence interval. Filtering is evaluated at each rank, so a filtered strain can still contribute evidence to a qualifying species or genus.
+
 ### Oxford Nanopore mode
 
-With `--nanopore`, GOTTCHA2 first converts the input read file into a temporary FASTA of fixed-length chunks to make long reads easier to map. In the current implementation, Nanopore mode:
+Use `-np/--nanopore` for a single ONT FASTA or FASTQ file. In v2.5.0 development, this selects direct mode by default. Direct mode maps each intact read to the signature database using `lr:hq` and the thresholds below.
 
-- requires exactly one input file
-- splits reads into non-overlapping 150 bp chunks
-- drops the trailing remainder if it is shorter than 150 bp
-- removes inconsistent chunk assignments after mapping
+The current profiling workflow does not run the earlier per-read species-support resolver. Mapping postprocessing selects the best primary alignment per read or mate before BAM conversion.
 
-If you do not override them explicitly, Nanopore mode uses these defaults:
+The earlier chunk workflow remains available with `-np --ont-chunk`. It splits reads into non-overlapping 150 bp pieces, drops a trailing piece shorter than 150 bp, and maps the pieces as short reads. The current profiling workflow does not run the earlier taxonomic consistency filter for chunks.
 
-- `--matchIdentity 0.85`
-- `--matchFraction 0.85`
-- `--matchLength 100`
-- `--errorRate 0.03`
+| Setting | Direct mode: `-np` | Chunk mode: `-np --ont-chunk` |
+| ------- | ------------------ | ----------------------------- |
+| Input used for mapping | Intact ONT reads | Non-overlapping 150 bp chunks |
+| minimap2 preset | `lr:hq` | `sr` |
+| `--matchIdentity` | `0.85` | `0.85` |
+| `--matchFraction` | `0` | `0.85` |
+| `--matchLength` | `100` bp | `100` bp |
+| `--errorRate` | `0.01` | `0.03` |
+| `--secondary` | `no` | `no` |
+| Automatic `--m2-options` | `-n1 -m25 -s120 --no-long-join` | `-s120` |
 
-### Singature of interest
+The lower direct-mode match fraction is intentional: a short signature alignment can cover only a small fraction of an intact long read. An alignment passes this threshold when the aligned span covers the required fraction of either the read or the signature fragment.
+
+### Mapping controls
+
+These options apply to short reads and both Nanopore workflows:
+
+- `--secondary yes|no`: request secondary candidates from minimap2 and allow secondary/supplementary alignments during BAM parsing. Default: `no`. Mapping postprocessing can still remove these candidates before BAM conversion.
+- `--max-secondary <INT>`: maximum secondary alignments requested per primary alignment when `--secondary yes` is used. Default: `10`; must be non-negative.
+- `--secondary-ratio <FLOAT>`: minimum secondary-to-primary minimap2 chaining-score ratio when secondary candidates are enabled. Default: `0.9`; accepted range: `0` to `1`.
+- `-xm/--presetx <STR>`: override the minimap2 preset. Direct mode defaults to `lr:hq`; other accepted values are `sr`, `map-pb`, and `map-ont`.
+- `--m2-options <STR>`: replace the automatically selected minimap2 tuning options. For values beginning with `-`, use the equals form, for example `--m2-options="-n2 -m25 -s150 --no-long-join"`.
+
+For example, this command requests up to 25 secondary candidates with a minimum chaining-score ratio of 0.7:
+
+```bash
+gottcha2 profile \
+  -d /path/to/db/gottcha_db.species.fna \
+  -i ont_reads.fastq.gz \
+  -np \
+  --secondary yes \
+  --max-secondary 25 \
+  --secondary-ratio 0.7 \
+  -t 8 \
+  -o out
+```
+
+`--ont-chunk` itself is only valid together with `-np/--nanopore`. For direct ONT mapping in `fast-profile`, the automatic options use `-n2` instead of `-n1` because mapping uses the extracted reference.
+
+### Experimental reciprocal groups
+
+Enable reciprocal grouping with `--reciprocal-groups yes`. The grouping algorithm links species in the same genus only when mappings support both directions. By default, each direction needs at least three independent read names and a 95% Wilson lower bound of at least `0.005` for the directional association fraction. Connected species form a group, including species connected through intermediate members.
+
+During aggregation, the observed species with the largest summed value of `--relAbu` represents its group. The default abundance field is `DEPTH`. Other members contribute to that species and its higher ranks; their strain identifiers are preserved, and `NOTE` records `Grouped with species ...`.
+
+```bash
+gottcha2 profile \
+  -d /path/to/db/gottcha_db.species.fna \
+  -i sample.fastq.gz \
+  --secondary yes \
+  --reciprocal-groups yes \
+  -o out \
+  -p sample.grouped
+```
+
+This option uses the intermediate SAM file available during mapping. Reusing a BAM alone does not reconstruct reciprocal groups. Mapping postprocessing removes competing alignments before the grouping step, so enabling this experimental option may leave species separate. Secondary candidate generation and reciprocal grouping are independent options, both disabled by default.
+
+### Signature of interest
 
 Use `--sigList` to provide a text file containing one accession or signature ID per line. This is useful for plasmids, spike-ins, or other targets you want to track during profiling.
 
 Use `--sigListAction` to control how those reads are handled:
 
-- `report_only` keeps all reads and reports the count in `SOI_READ_COUNT`
+- `report_only` keeps all reads and reports the count in `AOI_READ_COUNT`
 - `filter_out` removes reads matching listed accessions
 - `filter_in` keeps only reads matching listed accessions
 
@@ -365,6 +442,8 @@ If auto-detection is not possible, set it explicitly with `-l/--dbLevel`.
 4. Map reads only against that reduced reference.
 
 This mode is useful when you need faster execution with a smaller memory footprint. It still produces the standard GOTTCHA2 outputs, including the BAM and summary reports.
+
+Nanopore selection works the same way in fast mode: `fast-profile -np` maps intact ONT reads by default, while `fast-profile -np --ont-chunk` uses the chunk workflow. Direct fast mode uses `-n2 -m25 -s120 --no-long-join` by default for the reduced reference extracted by the prefilter.
 
 ---
 
@@ -455,8 +534,9 @@ By default, outputs go to `--outdir` and use a prefix derived from `--prefix`, t
 
 Typical outputs:
 
-- `*.tsv`, `*.csv`, or `*.biom` - summary report at the requested reporting level
-- `*.full.tsv` - full report including filtered taxa and notes
+- `*.tsv` or `*.csv` - summary report with qualified rows across taxonomic ranks
+- `*.biom` - BIOM report at the database rank selected with `--dbLevel`
+- `*.full.tsv` - full report including filtered taxa and notes, written for TSV/CSV runs; with `--format csv`, this file contains comma-separated data despite its `.tsv` suffix
 - `*.lineage.tsv` - lineage table for qualified taxa
 - `*.mpa.tsv` - MetaPhlAn-style output when `--mpa` is enabled
 - `*.extract.fasta` or `*.extract.fastq` - extracted reads when `--extract` or `extract` is used
@@ -467,9 +547,9 @@ Typical outputs:
 
 ## Thresholds and filtering
 
-Most taxonomic cutoffs default to `0` and are disabled unless you set them explicitly. Alignment thresholds are applied by default unless you lower them yourself.
+Coverage, read-count, covered-length, and z-score cutoffs default to `0` and are disabled unless you set them explicitly. SNI and alignment thresholds are enabled by default.
 
-Use `--noCutoff` to disable taxonomic profiling cutoffs. This is equivalent to:
+`--noCutoff` sets SNI thresholds to `0,0,0`. With the other cutoffs left at their defaults, this disables profiling-stage cutoffs. Explicit `-Mc`, `-Mr`, `-Ml`, or `-Mz` values remain active. To disable all profiling cutoffs explicitly, use:
 
 ```text
 -Mc 0 -Mr 0 -Ml 0 -Mz 0 -ss 0,0,0
@@ -478,10 +558,10 @@ Use `--noCutoff` to disable taxonomic profiling cutoffs. This is equivalent to:
 ### Alignment thresholds
 
 - `-mi, --matchIdentity <FLOAT>`
-  Minimum alignment identity for a valid match. Default: `0.95` for short reads, `0.85` for Nanopore mode.
+  Minimum alignment identity for a valid match. Default: `0.95` for short reads and `0.85` for both Nanopore workflows.
 
 - `-mf, --matchFraction <FLOAT>`
-  Minimum aligned fraction for a valid match. Default: `0.95` for short reads, `0.85` for Nanopore mode.
+  Minimum aligned fraction of the read or signature fragment for a valid match. Default: `0.95` for short reads, `0` for direct Nanopore mode, and `0.85` for Nanopore chunk mode.
 
 - `-mg, --matchLength <INT>`
   Minimum alignment length in bp. Default: `100`.
@@ -489,10 +569,10 @@ Use `--noCutoff` to disable taxonomic profiling cutoffs. This is equivalent to:
 ### Taxonomic profiling cutoffs
 
 - `-er, --errorRate <FLOAT>`
-  Estimated sequencing error rate. Default: `0.005` for short reads, `0.03` for Nanopore mode.
+  Estimated sequencing error rate used for SNI inference. Default: `0.005` for short reads, `0.01` for direct Nanopore mode, and `0.03` for Nanopore chunk mode.
 
 - `-ss, --sniScore <FLOAT>[,<FLOAT>,<FLOAT>]`
-  SNI-score thresholds for `other,species,strain`. Default: `0.9,0.95,0.99`.
+  SNI-score thresholds for `other,species,strain`. Default: `0.9,0.95,0.99`. One value applies to all ranks; two values supply `other,species` and retain the strain default of `0.99`.
 
 - `-Mc, --minCov <FLOAT>`
   Minimum signature coverage required for abundance calculation. Default: `0`.
@@ -512,31 +592,31 @@ Filtered taxa remain visible in `*.full.tsv`, with the reason recorded in `NOTE`
 
 ## Full report fields
 
-The full report (`<prefix>.full.tsv`) contains all computed metrics. The summary report contains the qualified rows shown at the requested reporting level.
+The full report (`<prefix>.full.tsv`) contains the fields below. The TSV/CSV summary contains qualified rows across ranks and the first 11 columns, from `LEVEL` through `REL_ABUNDANCE`. Rows whose `NOTE` contains `Filtered out` or `Not shown` remain only in the full report.
 
 | Field Name             | Description |
 | ---------------------- | ----------- |
 | LEVEL                  | Taxonomic rank (`superkingdom` through `strain`) |
 | NAME                   | Taxon name |
-| TAXID                  | NCBI taxonomy ID |
-| READ_COUNT             | Reads mapped to this taxon |
+| TAXID                  | Taxonomy identifier from the selected database |
+| READ_COUNT             | Read count accumulated from accepted reference alignments |
 | TOTAL_BP_MAPPED        | Total mapped bases across this taxon's signatures |
-| SNI_SCORE              | Signature nucleotide identity used during filtering and aggregation |
+| SNI_SCORE              | Coverage-adjusted, error-corrected consensus identity score used during filtering and aggregation |
 | COVERED_SIG_LEN        | Total covered signature length |
-| BEST_SIG_COV           | Highest signature coverage among rolled-up members |
-| DEPTH                  | Depth of coverage (`TOTAL_BP_MAPPED / TOTAL_SIG_LEN`) |
+| SIG_COV                | Coverage used for filtering: covered/total signature length for strains and recomputed species; otherwise the highest constituent coverage |
+| DEPTH                  | Mapped bases / total signature length for each reference entry; summed across entries during rollup |
 | REL_ABUNDANCE_GC       | Relative abundance from genomic-content estimate |
 | REL_ABUNDANCE          | Relative abundance from the field selected by `--relAbu` |
 | PARENT_NAME            | Parent taxon name |
 | PARENT_TAXID           | Parent taxonomy ID |
 | AOI_READ_COUNT         | Reads matched to `--sigList` entries |
-| TOTAL_READ_LEN         | Total aligned read length |
+| TOTAL_READ_LEN         | Total aligned query length across accepted alignments |
 | TOTAL_BP_MISMATCH      | Total mismatched bases |
 | TOTAL_BP_INDEL         | Total inserted and deleted bases |
-| READ_WT_SNI            | Read-weighted identity estimate |
-| CONSENSUS_SEQ_SNI      | Consensus-sequence identity estimate |
-| SNI_CI95_LH            | Low and high 95% confidence bounds for identity |
-| SIG_COV                | Signature coverage (`COVERED_SIG_LEN / TOTAL_SIG_LEN`) |
+| ALN_IDENTITY           | Alignment identity (`1 - TOTAL_BP_MISMATCH / TOTAL_BP_MAPPED`) |
+| CONSENSUS_SEQ_IDENTITY  | Consensus identity before error correction (`1 - CONSENSUS_DIFF / COVERED_SIG_LEN`); `CONSENSUS_DIFF` is an internal count of covered positions with majority mismatches |
+| SNI_CI95_LH            | Low and high 95% confidence bounds for SNI, formatted as `[low-high]` |
+| SIG_COV_RAW            | Aggregate signature coverage (`COVERED_SIG_LEN / TOTAL_SIG_LEN`) |
 | MAPPED_SIG_LEN         | Signature length with at least one mapped read |
 | TOTAL_SIG_LEN          | Total signature length for the taxon |
 | COVERED_SIG_DEPTH      | Depth across covered signature only |
@@ -546,9 +626,21 @@ The full report (`<prefix>.full.tsv`) contains all computed metrics. The summary
 | ABUNDANCE              | Raw abundance value from `--relAbu` |
 | REL_ABUNDANCE_DEPTH    | Relative abundance computed from depth |
 | SIG_LEVEL              | Signature rank used for mapping |
-| GENOME_COUNT           | Number of rolled-up genomes |
-| GENOME_SIZE            | Combined genome size used for GC normalization |
+| GENOME_COUNT           | Number of reference entries aggregated at this rank |
+| GENOME_SIZE            | Combined genome size, with a representative-species adjustment for species supported only by strain signatures |
 | NOTE                   | Filtering or rollup note |
+
+---
+
+## Running unit tests
+
+After installing the package and its Python dependencies, run the same unit-test discovery command used in CI from the repository root:
+
+```bash
+python -m unittest discover test -v
+```
+
+The unit suite covers CLI dispatch and defaults, ONT preprocessing, read extraction, reciprocal grouping, SNI and taxonomic aggregation, and TSV/CSV report fields. It uses small in-memory fixtures and temporary files, so it does not need a downloaded signature database or external mapping commands. The CI workflow separately runs functional profiling tests with the bundled Ebola test database.
 
 ---
 
@@ -583,16 +675,20 @@ For `fast-profile`, it expects:
 <db>.stats
 ```
 
-### `--nanopore` requires one input file
+### `-np/--nanopore` requires one input file
 
 Nanopore mode only accepts a single FASTA or FASTQ input file. If you have multiple files, merge them first or process them separately.
+
+### `--ont-chunk` requires Nanopore mode
+
+The chunk workflow is selected with `-np --ont-chunk`. Using `--ont-chunk` without `-np/--nanopore` is rejected because chunk preprocessing and postprocessing are specific to ONT reads.
 
 ### Python and external dependency checks happen at runtime
 
 GOTTCHA2 checks for:
 
 - Python 3.9+
-- `minimap2`
+- `minimap2` 2.27 or newer
 - `samtools`
 - `sylph` when `fast-profile` is used
 
@@ -608,7 +704,7 @@ If the summary report is empty, check the full report and the log before rerunni
 
 ### Fast profile cannot find `.syldb` or `.zip`
 
-`fast-profile` requires the standard database sidecar files plus the fast-mode `.syldb` and `.zip` files. If those files are missing, either download a fast-mode-compatible database bundle or use `profile` with the standard `.mmi` database.
+`fast-profile` requires `.syldb`, `.zip`, `.tax.tsv`, and `.stats` files with a shared prefix. It does not require the standard `.mmi` index. If the fast-mode files are missing, either download a fast-mode-compatible database bundle or use `profile` with the standard `.mmi` database.
 
 ### Identity and SNI changed from older releases
 
@@ -618,5 +714,5 @@ Modern GOTTCHA2 releases report `SNI_SCORE` from consensus identity. If you comp
 
 ## License and citation
 
-- License: [TBD]
+- License: BSD 3-Clause
 - If you use GOTTCHA2 in publications, cite the GOTTCHA or GOTTCHA2 project, the database source, and the exact software version reported by `gottcha2 version`.

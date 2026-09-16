@@ -80,7 +80,7 @@ def run_sylph_query(
     threads: int = 1,
     subsampling_rate: int = 100,
     minimum_ani: float = 80.0,
-    minimum_kmer: int = 50,
+    minimum_kmer: int = 5,
     read_seq_id: float = 99.5,
     additional_args: Optional[List[str]] = None
 ) -> subprocess.CompletedProcess:

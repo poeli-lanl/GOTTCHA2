@@ -380,6 +380,7 @@ def quick_concat(archive_path: Union[str, Path],
     Returns:
         Tuple of (concatenated content as bytes, list of processed files, list of skipped files)
     """
+    filenames = set(filenames)  # remove duplicates
     with FileArchive(archive_path, 'r') as archive:
         result, processed, skipped = archive.concat(filenames, separator=separator, skip_missing=skip_missing)
         
@@ -541,7 +542,7 @@ Examples:
 
 def read_file_list(file_path: str, filename_only: bool = False) -> List[str]:
     """
-    Read a list of filenames from a text file.
+    Read a list of unique filenames from a text file.
     
     Args:
         file_path: Path to the file containing the list
@@ -551,9 +552,11 @@ def read_file_list(file_path: str, filename_only: bool = False) -> List[str]:
     """
     with open(file_path, 'r') as f:
         if filename_only:
-            return [line.strip().split('/')[-1] for line in f if line.strip() and not line.strip().startswith('#')]
+            filenames = [line.strip().split('/')[-1] for line in f if line.strip() and not line.strip().startswith('#')]
         else:
-            return [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+            filenames = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+
+        return list(set(filenames))
 
 
 def unescape_separator(separator: str) -> str:

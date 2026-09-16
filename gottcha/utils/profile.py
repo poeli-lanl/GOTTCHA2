@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse as ap
-from asyncio import threads
 import re
 import sys, os, time, subprocess
 import pandas as pd
@@ -20,8 +19,9 @@ try:
     import ont_utils
     import read_mapping
     import aggregate_results
+    import reciprocal_graph
     import extract_reads
-    import gottcha.utils.prefilter as prefilter
+    import prefilter
     import sig_archive
     from gottcha2 import __version__
 except ImportError:
@@ -35,6 +35,7 @@ except ImportError:
     import gottcha.utils.read_mapping as read_mapping
     import gottcha.utils.extract_reads as extract_reads
     import gottcha.utils.prefilter as prefilter
+    import gottcha.utils.reciprocal_graph as reciprocal_graph
     import gottcha.utils.sig_archive as sig_archive
     from gottcha.gottcha2 import __version__
 
@@ -121,19 +122,39 @@ def parse_args(ver, args):
         ),
     )
     platform_group.add_argument(
+        '--ont-chunk',
+        action='store_true',
+        help=(
+            'Split ONT reads to 150-bp chunks and map them to GOTTCHA2 signature fragments.\n'
+            'If not specified, the default direct mapping workflow is used.'
+        ),
+    )
+    platform_group.add_argument(
         '-xm', '--presetx',
         metavar='STR',
         type=str,
-        default='sr',
-        choices=['sr', 'map-pb', 'map-ont'],
-        help='minimap2 preset passed with -x. [default: sr]',
+        default=None,
+        choices=['sr', 'map-pb', 'map-ont', 'lr:hq'],
+        help='minimap2 preset passed with -x. [default: lr:hq for --nanopore; sr otherwise]',
     )
     platform_group.add_argument(
-        '--m2options',
+        '--secondary', choices=['yes', 'no'], default='no',
+        help='Allow minimap2 secondary candidates. [default: no]',
+    )
+    platform_group.add_argument(
+        '--max-secondary', type=int, default=10,
+        help='Maximum minimap2 secondary candidates per primary alignment. [default: 10]',
+    )
+    platform_group.add_argument(
+        '--secondary-ratio', type=float, default=0.9,
+        help='Minimum minimap2 secondary/primary chaining-score ratio. [default: 0.9]',
+    )
+    platform_group.add_argument(
+        '--m2-options',
         metavar='STR',
         type=str,
         default='auto',
-        help="Additional minimap2 options. Use with care. [default: auto, resolved to '-s120']",
+        help='Additional minimap2 options. Use with care. [default: platform-specific auto settings]',
     )
     platform_group.add_argument(
         '-er', '--errorRate',
@@ -177,7 +198,7 @@ def parse_args(ver, args):
         help=(
             'Signature nucleotide identity (SNI) thresholds for taxonomic aggregation.\n'
             'One value applies to all ranks; two values append strain default 0.99;\n'
-            'three values mean other ranks, species, and strain. [default: 0.9,0.95,0.99]'
+            'three values mean other ranks, species, and strain. [default: 0.8,0.95,0.99]'
         ),
     )
     profiling_group.add_argument(
@@ -220,6 +241,12 @@ def parse_args(ver, args):
         default='DEPTH',
         choices=['DEPTH', 'READ_COUNT', 'GENOMIC_CONTENT_EST'],
         help='Field used to calculate relative abundance. [default: DEPTH]',
+    )
+    profiling_group.add_argument(
+        '--reciprocal-groups',
+        choices=['yes', 'no'], 
+        default='no',
+        help='(EXPERIMENTAL) Enable or disable reciprocal groups. [default: no]',
     )
 
     signature_group = p.add_argument_group('Signature-of-interest filtering')
@@ -309,7 +336,14 @@ def parse_args(ver, args):
         default=5,
         help='Minimum k-mer size for fast-profile prefiltering. [default: 5]',
     )
-
+    fast_group.add_argument(
+        '--fast-min-ani',
+        metavar='INT',
+        type=int,
+        default=80,
+        help='Minimum ANI for fast-profile prefiltering. [default: 80]',
+    )
+    
     logging_group = p.add_argument_group('Logging')
     logging_group.add_argument(
         '--silent',
@@ -443,6 +477,8 @@ def parse_args(ver, args):
             args_parsed.sniScore = ','.join([args_parsed.sniScore]*3)
         elif args_parsed.sniScore.count(',') == 1:
             args_parsed.sniScore = args_parsed.sniScore + ',0.99'
+    else:
+        args_parsed.sniScore = '0.9,0.95,0.99'
 
     # If mi/mf/mg are not specified, set them to default values based on whether --nanopore is specified
     # But if --extractOnly is specified, do not set default values for matchIdentity and matchFraction, the value will be load from the log file if not provided
@@ -458,8 +494,10 @@ def parse_args(ver, args):
 
     if args_parsed.matchFraction is None:
         if not args_parsed.extractOnly:
-            if args_parsed.nanopore:
+            if args_parsed.ont_chunk:
                 args_parsed.matchFraction = 0.85
+            elif args_parsed.nanopore:
+                args_parsed.matchFraction = 0
             else:
                 args_parsed.matchFraction = 0.95
     else:
@@ -487,15 +525,37 @@ def parse_args(ver, args):
         if error_message:
             p.error(error_message)
 
+    if args_parsed.ont_chunk and not args_parsed.nanopore:
+        p.error('--ont-chunk requires --nanopore.')
+
+    if args_parsed.max_secondary < 0:
+        p.error('--max-secondary must be >= 0.')
+
+    if not 0 <= args_parsed.secondary_ratio <= 1:
+        p.error('--secondary-ratio must be between 0 and 1.')
+
+    if args_parsed.presetx is None:
+        args_parsed.presetx = 'lr:hq' if (args_parsed.nanopore and not args_parsed.ont_chunk) else 'sr'
+
+    if args_parsed.m2_options == 'auto':
+        if args_parsed.nanopore and not args_parsed.ont_chunk:
+            # Fast mode builds the signature index on the fly and adds k24/w12
+            # below, so two minimizers are a useful short-fragment safeguard.
+            # Prebuilt GOTTCHA2 .mmi indexes retain k28/w24; allow one seed to
+            # initiate DP for ~100-bp signatures.
+            seed_chain = '-n2' if args_parsed.fast else '-n1'
+            args_parsed.m2_options = f'{seed_chain} -m25 -s120 --no-long-join'
+        else:
+            args_parsed.m2_options = '-s120'
+
     if args_parsed.noCutoff:
         args_parsed.sniScore = '0,0,0'
 
-    if args_parsed.m2options == 'auto':
-        args_parsed.m2options = '-s120'
-
     if not args_parsed.errorRate:
-        if args_parsed.nanopore:
+        if args_parsed.ont_chunk:
             args_parsed.errorRate = 0.03
+        elif args_parsed.nanopore:
+            args_parsed.errorRate = 0.01
         else:
             args_parsed.errorRate = 0.005
 
@@ -682,6 +742,7 @@ def main(args):
     global acc_list
 
     argvs = parse_args(__version__, args)
+    direct_ont_flag = bool(argvs.nanopore and not argvs.ont_chunk)
     begin_t  = time.time()
     bamfile  = Path(argvs.bam) if argvs.bam else Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.bam"
     samfile  = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam"
@@ -692,6 +753,7 @@ def main(args):
     multi_part_index_flag = False
     res_df = pd.DataFrame() # aggregated restuls
     logfile_prev = ""
+    reciprocal_groups = {}
 
     logging_level = logging.WARNING
 
@@ -742,22 +804,26 @@ def main(args):
         # if match criteria (mi/mf/mg) are not provided, load them from the log file
         if logfile_prev.is_file():
             (mi, mf, mg, sni_argv) = extract_reads.load_criteria_from_log(logfile_prev)
-
-        if argvs.sniScore is None:
-            argvs.sniScore = sni_argv
-
-        if (argvs.matchIdentity is None) and (argvs.matchFraction is None) and (argvs.matchLength is None):
-            argvs.matchIdentity = mi
-            argvs.matchFraction = mf
-            argvs.matchLength = mg
         else:
             logfile_prev = None
-            if argvs.matchIdentity is None:
-                argvs.matchIdentity = 0
-            if argvs.matchFraction is None:
-                argvs.matchFraction = 0
-            if argvs.matchLength is None:
-                argvs.matchLength = 0
+
+        if (argvs.sniScore is None) and sni_argv is not None:
+            argvs.sniScore = sni_argv
+
+        if (argvs.matchIdentity is None) and mi and mi >= 0:
+            argvs.matchIdentity = mi
+        else:
+            argvs.matchIdentity = 0
+
+        if (argvs.matchFraction is None) and mf and mf >= 0:
+            argvs.matchFraction = mf
+        else:
+            argvs.matchFraction = 0
+
+        if (argvs.matchLength is None) and mg and mg >= 0:
+            argvs.matchLength = mg
+        else:
+            argvs.matchLength = 0
 
     (sni_score_cutoff, sni_score_species, sni_score_strain) = [float(x) for x in argvs.sniScore.split(',')]
 
@@ -818,7 +884,7 @@ def main(args):
             custom_taxa_tsv = Path(argvs.database + ".taxa")
 
         taxonomy.loadTaxonomy(cus_taxonomy_file=custom_taxa_tsv, auto_download=False)
-        print_message(f" - {len(taxonomy.taxNames)} taxa loaded.", argvs.silent, begin_t, logfile)
+        print_message(f" - {len(taxonomy.taxNames):,} taxa loaded.", argvs.silent, begin_t, logfile)
 
         #load database stats
         print_message("Loading database stats...", argvs.silent, begin_t, logfile)
@@ -876,8 +942,12 @@ def main(args):
         # if nanopore option is on, preprocessing reads
         if argvs.nanopore:
             print_message("Checking nanopore read files...", argvs.silent, begin_t, logfile)
-            argvs.input = ont_utils.preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
-            split_read_flag = True
+            if direct_ont_flag:
+                print_message(" - Direct mapping ONT reads", argvs.silent, begin_t, logfile)
+            else:
+                print_message(" - Splitting ONT reads to chunks", argvs.silent, begin_t, logfile)
+                argvs.input = ont_utils.preprocess_nanopore_reads(argvs.input, argvs.outdir, argvs.prefix, argvs.silent)
+                split_read_flag = True
 
         if argvs.fast:
             print_message("Prefiltering reference genomes...", argvs.silent, begin_t, logfile)
@@ -886,7 +956,6 @@ def main(args):
             sylph_query_tsv = Path(argvs.outdir) / f"{argvs.prefix}.sylph_query.tsv"
             queried_signatures_file = Path(argvs.outdir) / f"{argvs.prefix}.sylph_queried_signatures.txt"
             extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.gz"
-            argvs.m2options += " -w12 -k24" # use smaller k-mer and minimizer length for better sensitivity in the prefiltering query; these values are based on testing and benchmarking, but can be further optimized in the future
             
             # extract subsample (cXXX) rate from sylph_db string, default set to 100
             subsampling_rate = 100
@@ -895,6 +964,7 @@ def main(args):
                 subsampling_rate = int(match.group(1))
 
             fast_min_kmer = argvs.fast_min_kmer
+            fast_min_ani = argvs.fast_min_ani
 
             # Run Sylph sketch if the input file is in FASTA format
             if Path(sylph_input[0]).name.endswith(('.fa', '.fasta', '.fa.gz', '.fna', '.fna.gz', '.fasta.gz')):
@@ -926,6 +996,7 @@ def main(args):
                     threads=argvs.threads,
                     subsampling_rate=subsampling_rate,
                     minimum_kmer=fast_min_kmer,
+                    minimum_ani=fast_min_ani,
                     read_seq_id=float(100-argvs.errorRate*100)
                 )
             except (FileNotFoundError, subprocess.CalledProcessError) as e:
@@ -976,7 +1047,18 @@ def main(args):
             minimap2_index = str(extracted_reference)
 
         print_message("Running read-mapping...", argvs.silent, begin_t, logfile)
-        exitcode, cmd, input_read_count, multi_part_index_flag = read_mapping.minimap2(argvs.input, minimap2_index, argvs.threads, argvs.m2options, argvs.presetx, samfile, logfile)
+        exitcode, cmd, input_read_count, multi_part_index_flag = read_mapping.minimap2(
+            argvs.input,
+            minimap2_index,
+            argvs.threads,
+            argvs.m2_options,
+            argvs.presetx,
+            samfile,
+            logfile,
+            allow_secondary=(argvs.secondary == 'yes'),
+            max_secondary=argvs.max_secondary,
+            secondary_ratio=argvs.secondary_ratio,
+        )
         logging.info(f"COMMAND: {cmd}")
 
         if exitcode != 0:
@@ -1004,16 +1086,40 @@ def main(args):
 
         gc.collect()
 
+    # # preprocess SAM file for nanopore reads
+    # if direct_ont_flag and Path(samfile).is_file():
+    #     print_message("Resolving direct ONT alignments...", argvs.silent, begin_t, logfile)
+    #     samfile_temp = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
+    #     tol_alignment_cnt, tol_q_alignment_cnt = ont_utils.direct_ont_reads_samfile_postprocessing(samfile, samfile_temp, argvs.ont_min_species_support)
+    #     samfile_temp.replace(samfile)
+    #     print_message(f" - {tol_alignment_cnt:,} total alignments", argvs.silent, begin_t, logfile)
+    #     print_message(f" - {tol_q_alignment_cnt:,} qualified-species alignments retained", argvs.silent, begin_t, logfile)
+    #     if tol_q_alignment_cnt == 0:
+    #         print_message("No direct ONT alignments remained after species resolution. Stopping.", argvs.silent, begin_t, logfile)
+    #         sys.exit(0)
+    #     gc.collect()
+    # elif argvs.nanopore and Path(samfile).is_file():
+    #     print_message("Removing inconsistent read chunks from SAM file...", argvs.silent, begin_t, logfile)
+    #     samfile_temp = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
+    #     tol_chunks_count, tol_chunks_qualified = ont_utils.split_reads_samfile_postprocessing(samfile, samfile_temp)
+    #     if tol_chunks_count > 0:
+    #         samfile_temp.rename(samfile)
+    #     print_message(f" - {tol_chunks_count:,} mapped read chunks processed", argvs.silent, begin_t, logfile)
+    #     print_message(f" - {tol_chunks_count-tol_chunks_qualified:,} inconsistent hits removed", argvs.silent, begin_t, logfile)
+    #     gc.collect()
     # preprocess SAM file for nanopore reads
-    if argvs.nanopore and Path(samfile).is_file():
-        # remove inconsistent read chunks from the SAM file
-        print_message("Removing inconsistent read chunks from SAM file...", argvs.silent, begin_t, logfile)
-        samfile_temp = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
-        tol_chunks_count, tol_chunks_qualified = ont_utils.split_reads_samfile_postprocessing(samfile, samfile_temp)
-        if tol_chunks_count > 0:
-            samfile_temp.rename(samfile)
-        print_message(f" - {tol_chunks_count:,} mapped read chunks processed", argvs.silent, begin_t, logfile)
-        print_message(f" - {tol_chunks_count-tol_chunks_qualified:,} inconsistent hits removed", argvs.silent, begin_t, logfile)
+    
+    if Path(samfile).is_file() and argvs.reciprocal_groups == 'yes':
+        print_message("Resolving reciprocal relationships from SAM file...", argvs.silent, begin_t, logfile)
+        reciprocal_groups = reciprocal_graph.reciprocal_relationships_from_sam(samfile, min_alen=argvs.matchLength)
+
+        for group in reciprocal_groups:
+            logging.debug(f"{group}:")
+            for species_taxid in reciprocal_groups[group]:
+                logging.debug(f" - {taxonomy.taxid2name(species_taxid)} ({species_taxid}); g__{taxonomy.taxid2nameOnRank(species_taxid, 'genus')}")
+
+        tol_reciprocal_groups = len(reciprocal_groups)
+        print_message(f" - {tol_reciprocal_groups:,} reciprocal groups identified", argvs.silent, begin_t, logfile)
         gc.collect()
 
     # processing alignments and generate results
@@ -1033,22 +1139,26 @@ def main(args):
 
         if Path(bamfile).exists() and Path(f"{bamfile}.bai").exists():
             print_message("Processing alignments...", argvs.silent, begin_t, logfile)
-            ref_chunk_results = process_bam.parse_aln_from_bam(bam_path=bamfile,
-                                                               processes=argvs.threads,
-                                                               min_frac=argvs.matchFraction,
-                                                               min_idt=argvs.matchIdentity,
-                                                               min_alen=argvs.matchLength,
-                                                               split_read_flag=split_read_flag)
+            ref_chunk_results = process_bam.parse_aln_from_bam(
+                bam_path=bamfile,
+                processes=argvs.threads,
+                min_frac=argvs.matchFraction,
+                min_idt=argvs.matchIdentity,
+                min_alen=argvs.matchLength,
+                include_secondary=(argvs.secondary == 'yes'),
+                include_supplementary=(argvs.secondary == 'yes'),
+                split_read_flag=split_read_flag
+            )
 
             str_df, soi_read_count = aggregate_results.group_refs_to_strains(ref_chunk_results, acc_list, argvs.sigListAction, df_stats)
 
-            tol_alignment_count = str_df['READ_COUNT'].sum()
+            tol_read_count = str_df['READ_COUNT'].sum()
             tol_invalid_match_count = str_df['INVALID_ALNS'].sum()
 
             print_message(f" - {tol_invalid_match_count:,} alignments did not meet matching criteria", argvs.silent, begin_t, logfile)
-            print_message(f" - {tol_alignment_count:,} qualified alignments processed", argvs.silent, begin_t, logfile)
+            print_message(f" - {tol_read_count:,} qualified reads processed", argvs.silent, begin_t, logfile)
 
-            if not tol_alignment_count:
+            if not tol_read_count:
                 print_message("No qualified alignments found. Stopping.", argvs.silent, begin_t, logfile)
                 sys.exit(0)
 
@@ -1063,14 +1173,16 @@ def main(args):
                      sni_score_species,
                      sni_score_strain,
                      sni_score_cutoff,
-                     argvs.errorRate)
+                     argvs.errorRate,
+                     df_stats,
+                     reciprocal_groups)
             res_df, soi_read_count = aggregate_results.aggregate_taxonomy(*_args)
 
             if acc_list:
                 print_message(f" - {soi_read_count:,} reads mapped to accession-of-interest", argvs.silent, begin_t, logfile)
-                read_count_after_soi = tol_alignment_count
+                read_count_after_soi = tol_read_count
                 if argvs.sigListAction == 'filter_out':
-                    read_count_after_soi = tol_alignment_count - soi_read_count
+                    read_count_after_soi = tol_read_count - soi_read_count
                 elif argvs.sigListAction == 'filter_in':
                     read_count_after_soi = soi_read_count
                 print_message(f" - {read_count_after_soi:,} reads after applying accession-of-interest action ({argvs.sigListAction})", argvs.silent, begin_t, logfile)
