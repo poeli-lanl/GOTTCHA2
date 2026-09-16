@@ -162,7 +162,7 @@ def group_refs_to_strains(ref_chunk_results: list, acc_list: list, acc_list_acti
     }).reset_index()
     # total length of signatures
     str_df['TOTAL_SIG_LEN'] = str_df['TAXID'].map(df_stats['TotalLength'])
-    str_df['BEST_SIG_COV'] = str_df['COVBASES']/str_df['TOTAL_SIG_LEN'] # bLC:  best linear coverage of a strain
+    str_df['SIG_COV'] = str_df['COVBASES']/str_df['TOTAL_SIG_LEN'] # bLC:  best linear coverage of a strain
     str_df['DEPTH'] = str_df['MAPPED_BASES']/str_df['TOTAL_SIG_LEN'] # roll-up DoC
     str_df['NOTE'] = str_df['TAXID'].map(df_stats['Note']).fillna('') # note for the strain
     
@@ -194,55 +194,6 @@ def group_refs_to_strains(ref_chunk_results: list, acc_list: list, acc_list_acti
     # estimate z-score
     str_df['ZSCORE'] = str_df.apply(lambda x: pile_lvl_zscore(x.TOTAL_BP_MAPPED, x.TOTAL_SIG_LEN, x.COVERED_SIG_LEN), axis=1)
 
-    # identify missing species representatives for strain-level taxa
-    strain_taxids = str_df.loc[str_df['SIG_LEVEL'].eq('strain'), 'TAXID']
-    logging.debug(f"Strain-level taxids: {strain_taxids.tolist()}")
-
-    if not strain_taxids.empty:
-        species_by_taxid = {}
-
-        def species_taxid(taxid):
-            if taxid not in species_by_taxid:
-                species_by_taxid[taxid] = taxonomy.taxid2taxidOnRank(taxid, 'species')
-            return species_by_taxid[taxid]
-
-        missing_species_rep = set(strain_taxids.map(species_taxid))
-        missing_species_rep.difference_update(
-            str_df.loc[str_df['SIG_LEVEL'].eq('species'), 'TAXID'].map(species_taxid)
-        )
-        missing_species_rep.difference_update((None, '', 'unknown'))
-
-        logging.debug(f"Missing species representatives: {missing_species_rep}")
-        if missing_species_rep:
-            representatives = {}
-            for taxid in df_stats.index[df_stats['DB_level'].eq('species')]:
-                species = species_taxid(taxid)
-                if species in missing_species_rep and species not in representatives:
-                    representatives[species] = taxid
-                    if len(representatives) == len(missing_species_rep):
-                        break
-
-            dummy_rows = []
-            for species in sorted(missing_species_rep, key=str):
-                taxid = representatives.get(species)
-                row = dict.fromkeys(str_df.columns, 0)
-                row.update(
-                    TAXID=taxid if taxid is not None else species,
-                    SIG_LEVEL='species',
-                    GENOME_COUNT=1,
-                    NOTE='Missing species representative strain information',
-                )
-                if taxid is not None:
-                    stats = df_stats.loc[taxid]
-                    row['TOTAL_SIG_LEN'] = stats['TotalLength']
-                    row['GENOME_SIZE'] = stats['GenomeSize']
-                    if pd.notna(stats['Note']) and stats['Note']:
-                        row['NOTE'] = f"{stats['Note']}; {row['NOTE']}"
-                dummy_rows.append(row)
-
-            str_df = pd.concat([str_df, pd.DataFrame(dummy_rows)], ignore_index=True)
-            logging.debug(f"DataFrame after adding missing species representatives:\n{str_df.to_string()}")
-
     return str_df, aoi_read_count
 
 
@@ -257,6 +208,7 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
                        sni_score_strain: float, 
                        sni_score_cutoff: float, 
                        error_rate: float,
+                       df_stats: pd.DataFrame,
                        groups: dict) -> pd.DataFrame:
     """
     Aggregate strain-level results to higher taxonomic ranks.
@@ -364,25 +316,23 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
             )
 
     # decide top signature level, convert the rank to the corresponding number
+    str_df['_SIG_LEVEL'] = str_df['SIG_LEVEL']
     str_df['SIG_LEVEL'] = str_df['SIG_LEVEL'].map(major_ranks)
 
     # infer the SNI-score for each strain
-    str_df["SIG_COV"] = 0.0
-    str_df["SNI_SCORE"] = 0.0
-    str_df["SNI_CI95_LH"] = "[0.0-0.0]"
-
     idx = str_df['COVERED_SIG_LEN'] > 0
-    str_df.loc[idx, "SIG_COV"] = str_df.loc[idx, "COVERED_SIG_LEN"]/str_df.loc[idx, "TOTAL_SIG_LEN"]
-    str_df.loc[idx, ["SNI_SCORE", "SNI_CI95_LH"]] = infer_sni_score(str_df.loc[idx, :], error_rate)
+    str_df = str_df[idx].reset_index(drop=True)
+    str_df["SIG_COV"] = str_df["COVERED_SIG_LEN"]/str_df["TOTAL_SIG_LEN"]
+    str_df[["SNI_SCORE", "SNI_CI95_LH"]] = infer_sni_score(str_df, error_rate)
 
     logging.debug(f"SNI-score inferred for {len(str_df)} strains.")
-
-    total_abundance = str_df[abu_col].sum()
 
     # iterate through ranks to get index and value
     for idx, rank in enumerate(ranks):
         str_df['LEVEL'] = rank
         str_df[['LVL_NAME', 'LVL_TAXID']] = str_df[[f'{rank}_name', f'{rank}_taxid']]
+
+        logging.debug(f"Processing rank: {rank} - {str_df['LVL_NAME'].tolist()}")
 
         if rank=='superkingdom':
             str_df[['PARENT_NAME', 'PARENT_TAXID']] = ['root', '1']
@@ -410,34 +360,59 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
                 'CONSENSUS_DIFF': 'sum',
                 'DEPTH': 'sum',
                 'AOI_READ_COUNT': 'sum',
-                'BEST_SIG_COV': 'max',
+                'SIG_COV': 'max',
                 'ZSCORE': 'min',
                 'GENOMIC_CONTENT_EST': 'sum',
                 'SIG_LEVEL': 'max',
+                '_SIG_LEVEL': lambda x: ','.join(list(sorted(x.unique()))), # get unique values 
                 'GENOME_COUNT': 'count',
                 'GENOME_SIZE': 'sum',
                 'SNI_SCORE': 'max',
                 'NOTE': lambda x: '; '.join(list(x.unique()))
             })
 
-            if rank == 'species':
-                lvl_df["SIG_COV"] = lvl_df["COVERED_SIG_LEN"]/lvl_df["TOTAL_SIG_LEN"]
-                lvl_df[['SNI_SCORE', 'SNI_CI95_LH']] = infer_sni_score(lvl_df, error_rate)
-                lvl_df['GENOMIC_CONTENT_EST'] = lvl_df['TOTAL_BP_MAPPED']/lvl_df['TOTAL_SIG_LEN']*(lvl_df['GENOME_SIZE']/lvl_df['GENOME_COUNT'])
-                lvl_df['ZSCORE'] = lvl_df.apply(lambda x: pile_lvl_zscore(x.TOTAL_BP_MAPPED, x.TOTAL_SIG_LEN, x.COVERED_SIG_LEN), axis=1)
-                lvl_df.reset_index(inplace=True)
-            else:
-                # find the index of the row with max SNI_SCORE in each group
-                # pull out the low/high bounds from those rows
-                idx = str_df.groupby('LVL_NAME')['SNI_SCORE'].idxmax()
-                score_bounds = (str_df
-                            .loc[idx, ['LVL_NAME', 'SNI_CI95_LH']]
-                            .set_index('LVL_NAME'))
-                lvl_df = lvl_df.join(score_bounds).reset_index()
+            # find the index of the row with max SNI_SCORE in each group
+            # pull out the low/high bounds from those rows
+            idx = str_df.groupby('LVL_NAME')['SNI_SCORE'].idxmax()
+            score_bounds = (str_df
+                        .loc[idx, ['LVL_NAME', 'SNI_CI95_LH']]
+                        .set_index('LVL_NAME'))
+            lvl_df = lvl_df.join(score_bounds)
+
+            if rank=="species":
+                # dealing with species that ONLY have strain-level signals
+                idx = (lvl_df['_SIG_LEVEL'] == 'strain')
+                if idx.any():
+                    # prepare the species-level statistics from df_stats for later use
+                    df_stats_species = df_stats.loc[df_stats['DB_level'] == 'species', ['TotalLength', 'GenomeSize']].copy().reset_index()
+                    df_stats_species['SPECIES_NAME'] = df_stats_species['Taxid'].apply(lambda x: taxonomy.taxid2nameOnRank(x, 'species'))
+                    df_stats_species = df_stats_species.set_index('SPECIES_NAME')
+                    logging.debug(f"Preparing species-level statistics for strains only: \n{df_stats_species}")
+
+                    # update the genome size to the representative genome size from species-level statistics + the total signature length of the strain
+                    lvl_df.loc[idx, "GENOME_SIZE"] = df_stats_species.loc[lvl_df.loc[idx].index, "GenomeSize"].values + lvl_df.loc[idx, "TOTAL_SIG_LEN"]
+                    # update the total signature length to include the representative genome's total length
+                    lvl_df.loc[idx, "TOTAL_SIG_LEN"] += df_stats_species.loc[lvl_df.loc[idx].index, "TotalLength"].values
+                    lvl_df.loc[idx, "SIG_COV"] = lvl_df.loc[idx, "COVERED_SIG_LEN"]/lvl_df.loc[idx, "TOTAL_SIG_LEN"]
+                    lvl_df.loc[idx, ["SNI_SCORE", "SNI_CI95_LH"]] = infer_sni_score(lvl_df.loc[idx, :], error_rate)
+
+                # Handling species with both species-level and strain-level signals
+                idx = (lvl_df['_SIG_LEVEL'] == 'species,strain')
+                if idx.any():
+                    # merging strain-level signals to species-level for the same species
+                    # strain-level "COVERED_SIG_LEN" -> species-level "COVERED_SIG_LEN"
+                    # strain-level "TOTAL_SIG_LEN" -> species-level "TOTAL_SIG_LEN"
+                    lvl_df.loc[idx, "SIG_COV"] = lvl_df.loc[idx, "COVERED_SIG_LEN"]/lvl_df.loc[idx, "TOTAL_SIG_LEN"]
+                    lvl_df.loc[idx, ["SNI_SCORE", "SNI_CI95_LH"]] = infer_sni_score(lvl_df.loc[idx, :], error_rate)
+
+            # reset the index after all the updates to get level names as a column
+            lvl_df = lvl_df.reset_index()
 
         # calculate the relative abundance of each taxon
         # the abundance and the relative abundance is calculated based on the specified column (abu_col)
         # Other depth-based and adjusted-genomic-content-based abundance values are also included
+        total_abundance = str_df[abu_col].sum()
+
         lvl_df['ABUNDANCE'] = lvl_df[abu_col]
         lvl_df['REL_ABUNDANCE'] = lvl_df[abu_col]/total_abundance
 
@@ -461,29 +436,29 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
         if rank == 'strain':
             filtered = (lvl_df['SNI_SCORE'] < sni_score_strain)
             lvl_df.loc[filtered, 'NOTE'] += (
-                f"Filtered out (strain SNI_SCORE threshold {sni_score_strain} > "
-                + lvl_df.loc[filtered, 'SNI_SCORE'].astype(str) + "); "
+                f"Filtered out (SNI_SCORE "
+                + lvl_df.loc[filtered, 'SNI_SCORE'].astype(str) + f" < strain threshold {sni_score_strain}); "
             )
 
         elif rank == 'species':
             filtered = (lvl_df['SNI_SCORE'] < sni_score_species)
             lvl_df.loc[filtered, 'NOTE'] += (
-                f"Filtered out (species SNI_SCORE threshold {sni_score_species} > "
-                + lvl_df.loc[filtered, 'SNI_SCORE'].astype(str) + "); "
+                f"Filtered out (SNI_SCORE "
+                + lvl_df.loc[filtered, 'SNI_SCORE'].astype(str) + f" < species threshold {sni_score_species}); "
             )
 
         else:
             filtered = (lvl_df['SNI_SCORE'] < sni_score_cutoff)
             lvl_df.loc[filtered, 'NOTE'] += (
-                f"Filtered out (SNI_SCORE threshold {sni_score_cutoff} > "
-                + lvl_df.loc[filtered, 'SNI_SCORE'].astype(str) + "); "
+                f"Filtered out (SNI_SCORE "
+                + lvl_df.loc[filtered, 'SNI_SCORE'].astype(str) + f" < threshold {sni_score_cutoff}); "
             )
 
         # add filtered reason
-        filtered = (lvl_df['BEST_SIG_COV'] < mc)
+        filtered = (lvl_df['SIG_COV'] < mc)
         lvl_df.loc[filtered, 'NOTE'] += (
             f"Filtered out (minCov threshold {mc} > "
-            + lvl_df.loc[filtered, 'BEST_SIG_COV'].astype(str) + "); "
+            + lvl_df.loc[filtered, 'SIG_COV'].astype(str) + "); "
         )
 
         filtered = (lvl_df['READ_COUNT'] < mr)
@@ -513,9 +488,9 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
 
     # add additional columns
     rep_df = rep_df.assign(
-        SIG_COV                = rep_df["COVERED_SIG_LEN"]/rep_df["TOTAL_SIG_LEN"],
-        READ_WT_SNI            = 1-(rep_df["TOTAL_BP_MISMATCH"]/rep_df["TOTAL_READ_LEN"]),
-        CONSENSUS_SEQ_SNI      = 1-(rep_df['CONSENSUS_DIFF']/rep_df["COVERED_SIG_LEN"]),
+        SIG_COV_RAW            = rep_df["COVERED_SIG_LEN"]/rep_df["TOTAL_SIG_LEN"],
+        ALN_IDENTITY           = 1-(rep_df["TOTAL_BP_MISMATCH"]/rep_df["TOTAL_BP_MAPPED"]),
+        CONSENSUS_SEQ_IDENTITY = 1-(rep_df['CONSENSUS_DIFF']/rep_df["COVERED_SIG_LEN"]),
         COVERED_MAPPED_SIG_COV = rep_df["COVERED_SIG_LEN"]/rep_df["MAPPED_SIG_LEN"],
         COVERED_SIG_DEPTH      = rep_df["TOTAL_BP_MAPPED"]/rep_df["COVERED_SIG_LEN"],
     )
@@ -523,6 +498,6 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
     rep_df.drop(columns=['TAXID'], inplace=True)
     rep_df.rename(columns={"LVL_NAME": "NAME", "LVL_TAXID": "TAXID"}, inplace=True)
 
-    logging.debug(f'rep_df:\n{rep_df}')
+    logging.debug(f'rep_df:\n{rep_df.T}')
 
     return rep_df, total_aoi_read_count

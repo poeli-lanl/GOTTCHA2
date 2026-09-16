@@ -146,8 +146,8 @@ def parse_args(ver, args):
         help='Maximum minimap2 secondary candidates per primary alignment. [default: 10]',
     )
     platform_group.add_argument(
-        '--secondary-ratio', type=float, default=0.95,
-        help='Minimum minimap2 secondary/primary chaining-score ratio. [default: 0.95]',
+        '--secondary-ratio', type=float, default=0.9,
+        help='Minimum minimap2 secondary/primary chaining-score ratio. [default: 0.9]',
     )
     platform_group.add_argument(
         '--m2-options',
@@ -198,7 +198,7 @@ def parse_args(ver, args):
         help=(
             'Signature nucleotide identity (SNI) thresholds for taxonomic aggregation.\n'
             'One value applies to all ranks; two values append strain default 0.99;\n'
-            'three values mean other ranks, species, and strain. [default: 0.9,0.95,0.99]'
+            'three values mean other ranks, species, and strain. [default: 0.8,0.95,0.99]'
         ),
     )
     profiling_group.add_argument(
@@ -1019,7 +1019,7 @@ def main(args):
                 print_message(f"ERROR: unable to parse Sylph query output {sylph_query_tsv}: {e}", argvs.silent, begin_t, logfile, errorout=1)
 
             filenames = sig_archive.read_file_list(queried_signatures_file, filename_only=True)
-            print_message(f" - Identified {len(set(filenames)):,} reference genomes.", argvs.silent, begin_t, logfile)
+            print_message(f" - Identified {len(filenames):,} reference genomes.", argvs.silent, begin_t, logfile)
             
             if len(filenames) == 0:
                 print_message("No references identified. GOTTCHA2 stopped.", argvs.silent, begin_t, logfile)
@@ -1174,6 +1174,7 @@ def main(args):
                      sni_score_strain,
                      sni_score_cutoff,
                      argvs.errorRate,
+                     df_stats,
                      reciprocal_groups)
             res_df, soi_read_count = aggregate_results.aggregate_taxonomy(*_args)
 

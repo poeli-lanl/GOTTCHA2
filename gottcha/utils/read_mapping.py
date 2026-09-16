@@ -57,7 +57,7 @@ def minimap2(
             filter_cmd,
             stdin=mm2.stdout,
             stdout=out_f,
-            stderr=subprocess.PIPE,
+            stderr=mm2.stderr,
             text=True,
             bufsize=1,
         )
@@ -74,7 +74,6 @@ def minimap2(
                 f.write(line)
 
         mm2.stderr.close()
-        filter.stderr.close()
         rc_mm = mm2.wait()
         filter.wait()
 
