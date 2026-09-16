@@ -1,15 +1,10 @@
 import os
-import sys
 import tempfile
-import types
 import unittest
 from collections import defaultdict
 
 import pandas as pd
 
-
-if "pysam" not in sys.modules:
-    sys.modules["pysam"] = types.ModuleType("pysam")
 
 from gottcha.utils import extract_reads
 

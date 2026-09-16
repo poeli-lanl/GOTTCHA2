@@ -31,21 +31,17 @@ def minimap2(
     mapped_re = re.compile(r"mapped (\d+) sequences")
     multi_part_index_flag = False
     input_read_count = 0
+    opts = mm_options.split()
 
-    opts = [f"-x {presetx}"]
-    if mm_options and mm_options.strip():
-        opts.append(mm_options.strip())
-    opts.extend(["-a", "--eqx", "--sam-hit-only"])
+    opts.extend(["-x", presetx, "-a", "--eqx", "--sam-hit-only"])
+
     if allow_secondary:
-        opts.extend([
-            f"-N{max(0, int(max_secondary))}",
-            "--secondary=yes",
-            f"-p{float(secondary_ratio):g}",
-        ])
+        opts.extend(["--secondary=yes", f"-N{max_secondary}", f"-p{secondary_ratio}"])
     else:
-        opts.extend(["-N20", "--secondary=no"])
+        opts.extend(["--secondary=no"])
 
     mm2_cmd = f"minimap2 {' '.join(opts)} -t{threads} {db} {input_file}"
+
     filter_cmd = ['samtools', 'view', '-x', 'SA']
 
     with samfile.open("w", encoding="utf-8") as out_f:
@@ -61,7 +57,7 @@ def minimap2(
             filter_cmd,
             stdin=mm2.stdout,
             stdout=out_f,
-            stderr=subprocess.PIPE,
+            stderr=mm2.stderr,
             text=True,
             bufsize=1,
         )
@@ -78,7 +74,6 @@ def minimap2(
                 f.write(line)
 
         mm2.stderr.close()
-        filter.stderr.close()
         rc_mm = mm2.wait()
         filter.wait()
 
