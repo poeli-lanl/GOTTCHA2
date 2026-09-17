@@ -29,6 +29,8 @@ Commands:
 
     extract       Extract reads of a specific taxon from profiled results
 
+    coherence     Inspect coordinate-aware signature and molecule-link evidence
+
     sam2bam       Convert GOTTCHA2 SAM to sorted/indexed BAM
 
     download      Download the latest GOTTCHA2 database
@@ -64,6 +66,12 @@ def cli():
         download.main(args[1:])
     elif args[0] == "sam2bam":
         sam_to_bam.main(args[1:])
+    elif args[0] == "coherence":
+        try:
+            from .utils import genome_coherence
+        except ImportError:
+            from utils import genome_coherence
+        genome_coherence.main(args[1:])
     elif args[0] == "version":
         print(f"{__version__}")
     elif args[0] == "extract":

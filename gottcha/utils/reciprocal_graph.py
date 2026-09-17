@@ -386,3 +386,19 @@ def reciprocal_relationships_from_sam(samfile: Path, min_alen: int) -> dict:
     species_groups = get_species_hit_groups(df)
 
     return species_groups
+
+
+def coordinate_evidence_from_sam(samfile, manifest_file, output_dir, *, config=None, **kwargs):
+    """Generate assembly-resolved evidence without changing reciprocal groups.
+
+    Returns genome_coherence.AnalysisResult, including diagnostic groups and
+    report paths. Do not feed these groups into winner-takes-all abundance
+    filtering: a component can contain multiple real species.
+    """
+    try:
+        from .genome_coherence import analyze_alignments
+    except ImportError:
+        from genome_coherence import analyze_alignments
+    return analyze_alignments(
+        [samfile], manifest_file, output_dir, config=config, **kwargs
+    )
