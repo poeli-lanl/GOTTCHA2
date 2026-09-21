@@ -8,6 +8,12 @@ from gottcha import gottcha2
 
 
 class TestGottcha2Cli(unittest.TestCase):
+    def test_cli_dispatches_coverage_browser(self):
+        with mock.patch.object(gottcha2.coverage_browser, "main") as browser_main:
+            with mock.patch.object(sys, "argv", ["gottcha2", "coverage-browser", "-r", "results", "-o", "sample.html"]):
+                gottcha2.cli()
+        browser_main.assert_called_once_with(["-r", "results", "-o", "sample.html"])
+
     def test_cli_dispatches_profile(self):
         with mock.patch.object(gottcha2.profile, "main") as profile_main:
             with mock.patch.object(sys, "argv", ["gottcha2", "profile", "-i", "reads.fq"]):

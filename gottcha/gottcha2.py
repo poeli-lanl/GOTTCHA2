@@ -6,11 +6,13 @@ try:
     from .utils import profile
     from .utils import download
     from .utils import sam_to_bam
+    from .utils import coverage_browser
 except ImportError:
     # If the above relative imports fail, try absolute imports (for direct execution)
     from utils import profile
     from utils import download
     from utils import sam_to_bam
+    from utils import coverage_browser
 
 import sys
 
@@ -31,6 +33,8 @@ Commands:
 
     sam2bam       Convert GOTTCHA2 SAM to sorted/indexed BAM
 
+    coverage-browser  Generate a coverage browser HTML from profiling results or a BAM
+
     download      Download the latest GOTTCHA2 database
 
     version       Display version information
@@ -45,6 +49,8 @@ Examples:
     gottcha2 download -d fast
 
     gottcha2 sam2bam -i prefix.sam -o prefix.bam
+
+    gottcha2 coverage-browser -r results/ -o sample.coverage.html
 
 For detailed help on a specific command:
     gottcha2 <command> --help
@@ -64,6 +70,8 @@ def cli():
         download.main(args[1:])
     elif args[0] == "sam2bam":
         sam_to_bam.main(args[1:])
+    elif args[0] == "coverage-browser":
+        coverage_browser.main(args[1:])
     elif args[0] == "version":
         print(f"{__version__}")
     elif args[0] == "extract":
