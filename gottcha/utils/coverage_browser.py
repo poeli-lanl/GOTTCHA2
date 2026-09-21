@@ -1460,7 +1460,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <div id="network-plot"></div>
                         <div class="network-legend" id="network-legend"></div>
                         <div class="network-species-panel">
-                            <h4 class="network-species-title">Relevant Species Profiled</h4>
+                            <h4 class="network-species-title">Relevant species profiled</h4>
                             <div id="network-species-table"></div>
                         </div>
                     </aside>
