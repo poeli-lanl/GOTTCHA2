@@ -1460,7 +1460,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <div id="network-plot"></div>
                         <div class="network-legend" id="network-legend"></div>
                         <div class="network-species-panel">
-                            <h4 class="network-species-title">Relevant Species</h4>
+                            <h4 class="network-species-title">Relevant Species Profiled</h4>
                             <div id="network-species-table"></div>
                         </div>
                     </aside>
@@ -1507,6 +1507,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     window.browserResourcesReady.then(function() {
         // The data will be injected here
         const genomeData = GENOME_DATA_PLACEHOLDER;
+        const speciesData = SPECIES_DATA_PLACEHOLDER;
         const coverageData = COVERAGE_DATA_PLACEHOLDER;
         const variantData = VARIANT_DATA_PLACEHOLDER;
         const vcfFiles = VCF_FILE_DATA_PLACEHOLDER;
@@ -1608,8 +1609,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 return { label: 'Status unavailable', tone: 'unknown' };
             }
             const note = profile.NOTE || '';
-            if (note.includes('Filtered out')) return { label: 'Filtered out', tone: 'filtered' };
-            if (note.includes('Not shown')) return { label: 'Not shown in summary', tone: 'hidden' };
+            if (note.includes('species SNI_SCORE')) return { label: 'Filtered out', tone: 'filtered' };
             return { label: 'Qualified', tone: 'qualified' };
         }
         
@@ -2173,25 +2173,29 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         function buildNetworkSpeciesRows(nodes) {
-            return nodes
-                .map(node => {
-                    const genome = genomeData.find(item => String(item.taxid) === node.id);
-                    const speciesName = networkSpeciesKey(node) || (genome && genome.parentName) || node.name || `TaxID ${node.id}`;
-                    // Prefer the full profiling TSV's READ_COUNT over the network node's
-                    // alignment-derived read count, falling back when no profile exists.
-                    const profileReadCount = genome ? genome.profile?.READ_COUNT : null;
-                    const readCount = profileReadCount !== null && profileReadCount !== undefined
-                        ? Number(profileReadCount)
-                        : Number(node.readCount || 0);
-                    const sniScore = genome ? genome.profile?.SNI_SCORE : null;
-                    return {
-                        taxid: node.id,
-                        speciesName,
-                        readCount,
-                        sniScore,
-                    };
-                })
-                .sort((a, b) => b.readCount - a.readCount);
+            return [
+                ...new Map(
+                    nodes.map(node => {
+                        const speciesName = networkSpeciesKey(node);
+                        const species = speciesData.find(
+                            item => String(item.name) === speciesName
+                        );
+
+                        if (!species) return null;
+
+                        return [
+                            species.taxid,
+                            {
+                                taxid: species.taxid,
+                                name: speciesName,
+                                readCount: species.readCount,
+                                sigCov: species.sigCov,
+                                sniScore: species.sniScore,
+                            }
+                        ];
+                    }).filter(Boolean)
+                ).values()
+            ].sort((a, b) => (b.readCount ?? 0) - (a.readCount ?? 0));
         }
 
         function updateNetworkSpeciesTable(nodes, selectedId) {
@@ -2204,9 +2208,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             }
 
             const rows = buildNetworkSpeciesRows(nodes).map(row => `
-                <tr class="${row.taxid === selectedId ? 'network-species-row-selected' : ''}">
-                    <td>${escapeHtml(row.speciesName)}</td>
-                    <td>${row.readCount.toLocaleString()}</td>
+                <tr>
+                    <td>${escapeHtml(row.name)}</td>
+                    <td>${formatProfileValue(row.readCount, 'count')}</td>
+                    <td>${formatProfileValue(row.sigCov, 'percent')}</td>
                     <td>${formatProfileValue(row.sniScore, 'score')}</td>
                 </tr>
             `).join('');
@@ -2218,6 +2223,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                             <tr>
                                 <th>Species</th>
                                 <th>Read Count</th>
+                                <th>Signature Coverage</th>
                                 <th>SNI Score</th>
                             </tr>
                         </thead>
@@ -3208,6 +3214,7 @@ def parse_full_file(full_file, uniq_taxid_list):
 
     uniq_taxids = {str(t) for t in uniq_taxid_list}
     df['TAXID'] = df['TAXID'].astype(str)
+    df_species = df[df['LEVEL'] == 'species'].copy()
     df = df[df['TAXID'].isin(uniq_taxids)]
     for field in PROFILE_COUNT_FIELDS + PROFILE_FLOAT_FIELDS:
         if field in df.columns:
@@ -3246,7 +3253,34 @@ def parse_full_file(full_file, uniq_taxid_list):
             'profile': profile,
         })
 
-    return genome_data
+    species_data = []
+    for _, row in df_species.iterrows():
+        taxid = str(row['TAXID'])
+        parent_name = '' if pd.isna(row['PARENT_NAME']) else str(row['PARENT_NAME'])
+        profile = {
+            field: '' if pd.isna(row[field]) else str(row[field])
+            for field in PROFILE_TEXT_FIELDS if field in df_species.columns
+        }
+        for fields, integer in ((PROFILE_COUNT_FIELDS, True), (PROFILE_FLOAT_FIELDS, False)):
+            profile.update({
+                field: _profile_number(row[field], integer)
+                for field in fields if field in df_species.columns
+            })
+        sig_cov = profile['SIG_COV']
+        read_count = profile['READ_COUNT']
+        sni_score = profile['SNI_SCORE']
+        species_data.append({
+            'db_level': profile['SIG_LEVEL'],
+            'name': profile['NAME'],
+            'parentName': parent_name,
+            'sigCov': sig_cov,
+            'taxid': taxid,
+            'superkingdom': row.get('SUPERKINGDOM', ''),
+            'readCount': read_count,
+            'sniScore': sni_score
+        })
+
+    return genome_data, species_data
 
 
 def _flatten_vcf_args(vcf_args):
@@ -3694,6 +3728,7 @@ def _compact_json(data):
 def generate_html(
     coverage_data,
     genome_data,
+    species_data,
     output_file,
     node_file,
     edge_file,
@@ -3710,6 +3745,7 @@ def generate_html(
     # Convert data to JSON for JavaScript
     coverage_json = _compact_json(_compact_coverage_for_html(coverage_data))
     genome_json = _compact_json(genome_data)
+    species_json = _compact_json(species_data)
     variant_json = _compact_json(variant_data)
     vcf_file_json = _compact_json(vcf_file_data)
     network_node_json = _compact_json(network_nodes)
@@ -3719,6 +3755,7 @@ def generate_html(
 
     # Replace placeholders in the HTML template
     html_content = html_content.replace('GENOME_DATA_PLACEHOLDER', genome_json)
+    html_content = html_content.replace('SPECIES_DATA_PLACEHOLDER', species_json)
     html_content = html_content.replace('COVERAGE_DATA_PLACEHOLDER', coverage_json)
     html_content = html_content.replace('VARIANT_DATA_PLACEHOLDER', variant_json)
     html_content = html_content.replace('VCF_FILE_DATA_PLACEHOLDER', vcf_file_json)
@@ -3823,7 +3860,7 @@ def main(argv=None):
             logging.info("Parsing coverage file...")
             coverage_data, uniq_taxid_list = parse_coverage_file(coverage)
             logging.info("Parsing full genome file...")
-            genome_data = parse_full_file(inputs.full, uniq_taxid_list)
+            genome_data, species_data = parse_full_file(inputs.full, uniq_taxid_list)
             logging.info("Parsing VCF files...")
             variant_data, vcf_file_data = parse_vcf_files(
                 [str(path) for path in vcfs], coverage_data, min_depth=args.min_depth
@@ -3831,7 +3868,7 @@ def main(argv=None):
             temporary_html = Path(tmp) / 'coverage.html'
             logging.info("Generating coverage HTML...")
             generate_html(
-                coverage_data, genome_data, temporary_html,
+                coverage_data, genome_data, species_data, temporary_html,
                 node_file=node_file, edge_file=edge_file, full_file=inputs.full,
                 variant_data=variant_data, vcf_file_data=vcf_file_data,
                 min_variant_depth=args.min_depth,
