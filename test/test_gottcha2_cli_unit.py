@@ -84,6 +84,18 @@ class TestGottcha2Cli(unittest.TestCase):
                     self.assertIn(gottcha2.__version__, output.getvalue())
                     profile_main.assert_not_called()
 
+    def test_cli_dispatches_fast_profile(self):
+        with mock.patch.object(gottcha2.profile, "main") as profile_main:
+            with mock.patch.object(sys, "argv", ["gottcha2", "fast-profile", "-i", "reads.fq"]):
+                gottcha2.cli()
+        profile_main.assert_called_once_with(["fast-profile", "-i", "reads.fq", "--fast"])
+
+    def test_cli_dispatches_extract_without_profiling(self):
+        with mock.patch.object(gottcha2.profile, "main") as profile_main:
+            with mock.patch.object(sys, "argv", ["gottcha2", "extract", "-b", "sample.bam", "-e", "562"]):
+                gottcha2.cli()
+        profile_main.assert_called_once_with(["extract", "-b", "sample.bam", "-e", "562", "-eo"])
+
     def test_cli_prints_version(self):
         buf = io.StringIO()
         with mock.patch.object(sys, "stdout", buf):
