@@ -1,5 +1,6 @@
 # Stage 1: Builder
-FROM mambaorg/micromamba:latest AS builder
+ARG MICROMAMBA_VERSION=2.9
+FROM mambaorg/micromamba:${MICROMAMBA_VERSION} AS builder
 
 USER root
 
@@ -25,7 +26,7 @@ COPY --chown=$MAMBA_USER:$MAMBA_USER . /app
 RUN micromamba run -n base pip install --no-cache-dir .
 
 # Stage 2: Runtime
-FROM mambaorg/micromamba:latest
+FROM mambaorg/micromamba:${MICROMAMBA_VERSION}
 
 USER root
 

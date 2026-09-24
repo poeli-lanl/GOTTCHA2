@@ -41,8 +41,11 @@ import logging
 from collections import Counter, defaultdict
 from typing import Iterable, List, Optional, Tuple
 
+from pathlib import Path
 import numpy as np
 import pysam
+
+from gottcha.utils import extract_reads
 
 # Global BAM handle and config for worker processes
 _BAM: Optional[pysam.AlignmentFile] = None
@@ -333,6 +336,8 @@ def write_taxid_network(bam_path: str, node_path: str, edge_path: str) -> None:
 
     Secondary alignments are ignored.
     """
+    
+
     node_reads = defaultdict(set)
     node_counts = defaultdict(lambda: [0, 0, 0])
 
@@ -353,21 +358,25 @@ def write_taxid_network(bam_path: str, node_path: str, edge_path: str) -> None:
 
     global _BAM, _CFG
 
+    if not _CFG:
+        logfile_prev = Path(bam_path).with_suffix(".log")
+        if logfile_prev.is_file():
+            (mi, mf, mg, sni_argv) = extract_reads.load_criteria_from_log(logfile_prev)
+        
+        _CFG = {
+            "min_mapq": 0,
+            "min_idt": mi if mi is not None else 0.85,
+            "min_frac": mf if mf is not None else 0,
+            "min_alen": mg if mg is not None else 100,
+            "include_secondary": False,
+            "include_supplementary": True,
+            "include_duplicates": False,
+            "include_qcfail": False,
+            "split_read_flag": False,
+        }
+
     with pysam.AlignmentFile(bam_path, "rb") as bam:
         _BAM = bam
-
-        if not _CFG:
-            _CFG = {
-                "min_mapq": 0,
-                "min_frac": 0,
-                "min_idt": 0.85,
-                "min_alen": 100,
-                "include_secondary": False,
-                "include_supplementary": True,
-                "include_duplicates": False,
-                "include_qcfail": False,
-                "split_read_flag": False,
-            }
 
         for aln in bam.fetch(until_eof=True):
 
