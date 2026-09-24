@@ -67,6 +67,13 @@ GOTTCHA2 profiler is written in Python 3 and uses minimap2 to map reads to signa
 
         `gottcha2 profile -d /path/to/db/ -t 8 -i <FASTQ>`
 
+4. Generate a standalone coverage browser from the result directory:
+
+        `gottcha2 coverage-browser -r out -o sample.coverage.html -t 8`
+
+   For explicit BAM, reference FASTA, and full report inputs, see the
+   [coverage browser tutorial](docs/tutorial.md#coverage-browser).
+
 -------------------------------------------------------------------
 ## RESULT
 

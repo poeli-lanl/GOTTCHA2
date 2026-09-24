@@ -1,0 +1,1 @@
+recursive-include gottcha/data/html *.js *.css *.woff2 *.txt *.json *.md

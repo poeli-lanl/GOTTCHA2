@@ -38,10 +38,14 @@ import multiprocessing as mp
 import os
 import sys
 import logging
+from collections import Counter, defaultdict
 from typing import Iterable, List, Optional, Tuple
 
+from pathlib import Path
 import numpy as np
 import pysam
+
+from gottcha.utils import extract_reads
 
 # Global BAM handle and config for worker processes
 _BAM: Optional[pysam.AlignmentFile] = None
@@ -76,7 +80,7 @@ def _init_worker(
     }
 
 
-def _is_aln_valid(aln, rname, start0) -> Tuple[bool, Optional[str]]:
+def _is_aln_valid(aln, rname) -> Tuple[bool, Optional[str]]:
     global _CFG, _BAM
     min_mapq = _CFG["min_mapq"]
     min_frac = _CFG["min_frac"]
@@ -100,9 +104,6 @@ def _is_aln_valid(aln, rname, start0) -> Tuple[bool, Optional[str]]:
         return False, "aln_type"
     if aln.mapping_quality < min_mapq:
         return False, "aln_quality"
-
-    if aln.reference_start < start0:
-        return False, "aln_position"
 
     # Note: aln.reference_start is 0-based leftmost coordinate of the alignment on the reference.
     # Only count reads that have their aligned portion starting within the chunk towards numreads, to avoid double-counting reads that span multiple chunks.
@@ -182,7 +183,11 @@ def _process_chunk(task: Tuple[str, int, int]) -> List:
 
     # Iterate reads overlapping this region.
     for aln in bam.fetch(rname, start0, end0):
-        valid, reason = _is_aln_valid(aln, rname, start0)
+        valid, reason = _is_aln_valid(aln, rname)
+
+        if aln.reference_start < start0:
+            valid, reason = False, "aln_position"
+        
         if not valid:
             invalid_alns += 1
             continue
@@ -300,6 +305,235 @@ def _iter_tasks(references: List[str], lengths: List[int], chunk_size: int) -> I
         for start0 in range(0, rlen, cs):
             end0 = min(start0 + cs, rlen)
             yield (rname, start0, end0)
+def _taxid_from_rname(rname: str) -> str:
+    """Extract TAXID from reference name: ...|...|TAXID|... ."""
+    parts = rname.rsplit("|", 2)
+    return parts[-2] if len(parts) >= 3 else rname
+
+
+def _read_key(aln) -> Tuple[str, int]:
+    """Distinguish mates while keeping ordinary/long reads simple."""
+    if aln.is_paired:
+        if aln.is_read1:
+            return (aln.query_name, 1)
+        if aln.is_read2:
+            return (aln.query_name, 2)
+    return (aln.query_name, 0)
+
+
+def write_taxid_network(bam_path: str, node_path: str, edge_path: str) -> None:
+    """
+    Write TAXID node/edge statistics from primary and supplementary alignments.
+
+    Edges are generated from:
+
+        1. Primary -> supplementary alignment of the same read/mate.
+
+        2. For paired-end reads:
+               read1 primary TAXID -> read2 primary TAXID
+
+           when the two mates map to different TAXIDs.
+
+    Secondary alignments are ignored.
+    """
+    
+
+    node_reads = defaultdict(set)
+    node_counts = defaultdict(lambda: [0, 0, 0])
+
+    # Primary alignment for each individual read/mate:
+    #
+    #   (QNAME, 0) -> TAXID     single/long read
+    #   (QNAME, 1) -> TAXID     mate 1
+    #   (QNAME, 2) -> TAXID     mate 2
+    primary_by_read = {}
+
+    # Supplementary TAXIDs associated with each read/mate.
+    supp_by_read = defaultdict(list)
+
+    # Primary mappings for paired-end reads:
+    #
+    #   QNAME -> {1: taxid1, 2: taxid2}
+    pair_primary = defaultdict(dict)
+
+    global _BAM, _CFG
+
+    if not _CFG:
+        logfile_prev = Path(bam_path).with_suffix(".log")
+        if logfile_prev.is_file():
+            (mi, mf, mg, sni_argv) = extract_reads.load_criteria_from_log(logfile_prev)
+        
+        _CFG = {
+            "min_mapq": 0,
+            "min_idt": mi if mi is not None else 0.85,
+            "min_frac": mf if mf is not None else 0,
+            "min_alen": mg if mg is not None else 100,
+            "include_secondary": False,
+            "include_supplementary": True,
+            "include_duplicates": False,
+            "include_qcfail": False,
+            "split_read_flag": False,
+        }
+
+    with pysam.AlignmentFile(bam_path, "rb") as bam:
+        _BAM = bam
+
+        for aln in bam.fetch(until_eof=True):
+
+            # Avoid trying to obtain an RNAME for an unmapped alignment.
+            if aln.is_unmapped or aln.reference_id < 0:
+                continue
+
+            # Do not use secondary alignments in this network.
+            if aln.is_secondary:
+                continue
+
+            rname = bam.get_reference_name(aln.reference_id)
+            taxid = _taxid_from_rname(rname)
+
+            valid, reason = _is_aln_valid(aln, rname)
+            if not valid:
+                continue
+
+            key = _read_key(aln)
+
+            # Node statistics.
+            #
+            # This preserves the original meaning of READ_COUNT as
+            # unique QNAMEs/fragments.
+            node_reads[taxid].add(aln.query_name)
+            node_counts[taxid][0] += 1  # all valid alignments
+
+            if aln.is_supplementary:
+                node_counts[taxid][2] += 1
+                supp_by_read[key].append(taxid)
+
+            else:
+                # Since secondary alignments have already been excluded,
+                # this is a true primary alignment.
+                node_counts[taxid][1] += 1
+
+                primary_by_read[key] = taxid
+
+                # Remember mate-1 and mate-2 primary mappings separately.
+                if aln.is_paired:
+                    if aln.is_read1:
+                        pair_primary[aln.query_name][1] = taxid
+                    elif aln.is_read2:
+                        pair_primary[aln.query_name][2] = taxid
+
+    # ------------------------------------------------------------------
+    # Build edges
+    # ------------------------------------------------------------------
+
+    edge_alignment_count = Counter()
+    edge_reads = defaultdict(set)
+
+    def add_edge(source_taxid, target_taxid, qname):
+        if source_taxid == target_taxid:
+            return
+
+        edge = (source_taxid, target_taxid)
+        edge_alignment_count[edge] += 1
+        edge_reads[edge].add(qname)
+
+    # 1. Primary -> supplementary edges.
+    #
+    # Supplementary alignments remain associated with their own mate:
+    #
+    #   read1 primary -> read1 supplementary
+    #   read2 primary -> read2 supplementary
+    #
+    for key, targets in supp_by_read.items():
+        source_taxid = primary_by_read.get(key)
+
+        if source_taxid is None:
+            continue
+
+        qname = key[0]
+
+        for target_taxid in targets:
+            add_edge(source_taxid, target_taxid, qname)
+
+    # 2. Paired-end read1 -> read2 edges.
+    #
+    # Example:
+    #
+    #   readX/1 -> taxid1
+    #   readX/2 -> taxid2
+    #
+    # produces:
+    #
+    #   taxid1 -> taxid2
+    #
+    for qname, mates in pair_primary.items():
+        taxid1 = mates.get(1)
+        taxid2 = mates.get(2)
+
+        if taxid1 is None or taxid2 is None:
+            continue
+
+        add_edge(taxid1, taxid2, qname)
+
+    # ------------------------------------------------------------------
+    # Write node table
+    # ------------------------------------------------------------------
+
+    with open(node_path, "w", encoding="utf-8") as out:
+        out.write(
+            "TAXID\tREAD_COUNT\tALIGNMENT_COUNT\t"
+            "PRIMARY_ALIGNMENT_COUNT\tSUPP_ALIGNMENT_COUNT\n"
+        )
+
+        for taxid in sorted(node_counts):
+            aln_count, primary_count, supp_count = node_counts[taxid]
+
+            out.write(
+                f"{taxid}\t"
+                f"{len(node_reads[taxid])}\t"
+                f"{aln_count}\t"
+                f"{primary_count}\t"
+                f"{supp_count}\n"
+            )
+
+    logging.info(
+        f"{len(node_counts)} nodes. Node file written to: {node_path}",
+    )
+
+    # ------------------------------------------------------------------
+    # Write edge table
+    # ------------------------------------------------------------------
+
+    with open(edge_path, "w", encoding="utf-8") as out:
+        out.write(
+            "SOURCE_TAXID\tTARGET_TAXID\t"
+            "READ_COUNT\tALIGNMENT_COUNT\n"
+        )
+
+        for edge, aln_count in sorted(
+            edge_alignment_count.items(),
+            key=lambda x: (
+                -len(edge_reads[x[0]]),
+                -x[1],
+                x[0][0],
+                x[0][1],
+            ),
+        ):
+            source_taxid, target_taxid = edge
+
+            out.write(
+                f"{source_taxid}\t"
+                f"{target_taxid}\t"
+                f"{len(edge_reads[edge])}\t"
+                f"{aln_count}\n"
+            )
+
+    logging.info(
+        f"{len(edge_alignment_count)} edges. Edge file written to: {edge_path}",
+    )
+
+    return node_path, edge_path
+
 
 def parse_aln_from_bam(bam_path: str,
                        processes: int, 
@@ -426,6 +660,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--include-supplementary", action="store_true", help="Include supplementary alignments (default: off).")
     p.add_argument("--include-duplicates", action="store_true", help="Include duplicate-marked reads (default: off).")
     p.add_argument("--include-qcfail", action="store_true", help="Include QC-failed reads (default: off).")
+    p.add_argument(
+        "--taxid-network",
+        action="store_true",
+        help="Also write <out>.nodes.tsv and <out>.edges.tsv from primary/supplementary TAXID links (default: off).",
+    )
 
     # Coordinate output style
     p.add_argument(
@@ -457,6 +696,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     with open(out_path, "w", encoding="utf-8") as out:
         for res in ref_results:
             out.write("\t".join(map(str, res)) + "\n")
+
+    if args.taxid_network:
+        base = out_path[:-4] if out_path.lower().endswith(".tsv") else out_path
+        node_path = base + ".nodes.tsv"
+        edge_path = base + ".edges.tsv"
+        logging.debug(f"Writing TAXID network: {node_path}, {edge_path}")
+        write_taxid_network(args.bam, node_path, edge_path)
 
     return 0
 

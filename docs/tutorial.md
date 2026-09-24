@@ -19,6 +19,7 @@ GOTTCHA2 is a gene-independent, signature-based metagenomic taxonomic profiler f
 - [Profiling](#profiling)
 - [Fast profile mode](#fast-profile-mode)
 - [Read extraction](#read-extraction)
+- [Coverage browser](#coverage-browser)
 - [Output files](#output-files)
 - [Thresholds and filtering](#thresholds-and-filtering)
 - [Full report fields](#full-report-fields)
@@ -327,6 +328,7 @@ gottcha2 <command> [options]
 | `fast-profile` | Prefilter the database with `sylph`, then run profiling on a reduced reference set. | `gottcha2 fast-profile -d DB -i reads.fastq.gz -o out` |
 | `extract` | Extract reads assigned to one or more taxa from an existing BAM. | `gottcha2 extract -b sample.bam -e 562` |
 | `sam2bam` | Convert legacy GOTTCHA2 SAM output into sorted, indexed BAM. | `gottcha2 sam2bam -i sample.sam -o sample.bam` |
+| `coverage-browser` | Generate an interactive coverage and variant browser from profiling results. | `gottcha2 coverage-browser -r out -o sample.coverage.html` |
 | `download` | Download the default database bundle, when supported by your build. | `gottcha2 download` |
 | `version` | Print the installed GOTTCHA2 version. | `gottcha2 version` |
 
@@ -525,6 +527,63 @@ Example:
 >read123.1|chrA|1|300|GCF10000:10..120 LEVEL=species NAME=Escherichia_coli TAXID=562 AOI=False MG=148 MI=98.65 MF=0.99
 ACGT...
 ```
+
+---
+
+## Coverage browser
+
+Use `coverage-browser` to generate a standalone HTML report from an existing GOTTCHA2 run:
+
+```bash
+gottcha2 coverage-browser -r out -o out/sample.coverage.html -t 8
+```
+
+`-r/--results` finds the sample's `<prefix>.gottcha_<level>.bam` and matching `<prefix>.full.tsv` in the result directory. It also looks for `<prefix>.sylph_extracted.fa.bgz`, `.fa.gz`, or `.fa` for variant calling, or an existing `<prefix>.gottcha_<level>.vcf.gz` with a `.tbi` index. If multiple samples are present, select one with `-p/--prefix`:
+
+```bash
+gottcha2 coverage-browser -r out -p sample -t 8
+```
+
+The default output is `out/sample.coverage.html`. If multiple BAMs share that prefix, use `--bam` to select the database level explicitly. Discovery only searches the supplied directory; files stored elsewhere can be supplied directly.
+
+You can also specify all input files and the output location:
+
+```bash
+gottcha2 coverage-browser \
+  -b sample.gottcha_species.bam \
+  --reference reference.fa \
+  -f sample.full.tsv \
+  -o sample.coverage.html \
+  --min-depth 5 \
+  -t 8
+```
+
+`--reference` accepts plain, gzip, or BGZF FASTA. It must contain the signature contigs used to produce the BAM, with the same names and lengths. A whole-genome FASTA with different contig names cannot substitute for the signature reference. Explicit file arguments override directory discovery; `-r out -p sample -b /other/location/sample.bam` also supports runs made from an external BAM.
+
+The command uses the samtools and bcftools bundled with the required `pysam` package to:
+
+1. Compute `samtools coverage` statistics from the BAM.
+2. Prepare and index a temporary BGZF reference, when available.
+3. Run `bcftools mpileup` with mapping and base quality thresholds of 20 and `FORMAT/DP,FORMAT/AD`, then call haploid variants with `bcftools call -mv --ploidy 1`.
+4. Index the compressed VCF and embed the coverage, taxonomy, and variant data in the HTML.
+
+Separate `samtools`, `bgzip`, and `bcftools` executables are not needed by this subcommand. Temporary coverage, reference, pileup, and VCF files are removed after rendering; original inputs are preserved. The HTML includes its JavaScript, styles, and fonts and can be opened offline in a current browser.
+
+The **Genome Signature Information** section displays the selected genome's full profiling results: profiled reads, relative abundance, SNI score and confidence interval, signature coverage and depth, alignment and consensus identity, read evidence, and abundance estimates. It also shows the row's qualification status and any filtering or reassignment notes. These values come from the full report and can differ from the alignment-based summary above the plot. Missing optional columns are omitted from the detailed groups; unavailable values display as an em dash, while measured zeros remain visible.
+
+If neither a reference nor a VCF is available, the command generates coverage-only HTML. Use `--no-variants` to request this explicitly. To supply existing variants instead of calling them, use `--vcf variants.vcf.gz`; each supplied VCF needs a `.tbi` index. `--min-depth` filters displayed variants by `INFO/DP` (default: 5), independently of the quality thresholds used during calling.
+
+The existing coverage-table workflow remains available, including through the standalone script:
+
+```bash
+gottcha2 coverage-browser \
+  -c sample.gottcha_species.coverage.tsv \
+  -f sample.full.tsv \
+  --vcf sample.gottcha_species.vcf.gz \
+  -o sample.coverage.html
+```
+
+Run `gottcha2 coverage-browser --help` for all options.
 
 ---
 
