@@ -5,14 +5,16 @@ Lightweight file archive using ZIP for random access to thousands of signature f
 
 import zipfile
 import io
+import gzip
 import shutil
 import sys
 import argparse
 import logging
 import logging
+import tempfile
 from pathlib import Path
 from typing import List, Union, Optional, Iterator, Tuple
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 
 class FileArchive:
     """
@@ -387,6 +389,60 @@ def quick_concat(archive_path: Union[str, Path],
     if output_path:
         Path(output_path).write_bytes(result)
         
+    return result, processed, skipped
+
+
+def quick_concat_to_bgzip(archive_path: Union[str, Path], 
+                            filenames: List[str],
+                            output_path: Optional[Union[str, Path]] = None,
+                            separator: bytes = b'',
+                            skip_missing: bool = True) -> Tuple[bytes, List[str], List[str]]:
+    """
+    Concatenate plain or gzip-compressed archive members into a BGZF stream.
+    
+    Args:
+        archive_path: Path to the archive
+        filenames: List of files to concatenate
+        output_path: Optional path to save the result
+        separator: Optional separator between files
+        skip_missing: If True, skip files not found in archive
+        
+    Returns:
+        Tuple of (BGZF content as bytes, list of processed files, list of skipped files)
+    """
+    import pysam
+
+    processed = []
+    skipped = []
+    with ExitStack() as stack:
+        if output_path is None:
+            temporary = stack.enter_context(tempfile.NamedTemporaryFile(suffix='.bgz'))
+            destination = Path(temporary.name)
+        else:
+            destination = Path(output_path)
+
+        with FileArchive(archive_path, 'r') as archive, pysam.BGZFile(str(destination), 'wb') as target:
+            for filename in dict.fromkeys(filenames):
+                try:
+                    member = archive._zipfile.open(filename, 'r')
+                except KeyError:
+                    if not skip_missing:
+                        raise FileNotFoundError(f"File not found in archive: {filename}") from None
+                    skipped.append(filename)
+                    continue
+
+                with member:
+                    if processed and separator:
+                        target.write(separator)
+                    if member.peek(2).startswith(b'\x1f\x8b'):
+                        with gzip.GzipFile(fileobj=member, mode='rb') as source:
+                            shutil.copyfileobj(source, target, length=1024 * 1024)
+                    else:
+                        shutil.copyfileobj(member, target, length=1024 * 1024)
+                processed.append(filename)
+
+        result = destination.read_bytes()
+
     return result, processed, skipped
 
 

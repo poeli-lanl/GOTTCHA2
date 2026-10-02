@@ -109,7 +109,7 @@ def load_database_stats(db_stats_file: str) -> pd.DataFrame:
         1. Rank
         2. Name
         3. Taxid
-        4. Superkingdom
+        4. Domain
         5. NumOfSeq
         6. Max
         7. Min
@@ -420,7 +420,7 @@ def main(argvs):
             g2_archive = f"{argvs.database}.zip"
             sylph_query_tsv = Path(argvs.outdir) / f"{argvs.prefix}.sylph_query.tsv"
             queried_signatures_file = Path(argvs.outdir) / f"{argvs.prefix}.sylph_queried_signatures.txt"
-            extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.gz"
+            extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.bgz"
             
             # extract subsample (cXXX) rate from sylph_db string, default set to 100
             subsampling_rate = 100
@@ -491,10 +491,10 @@ def main(argvs):
                 sys.exit(0)
 
             # Extract those signatures from the archive to create a smaller reference for read mapping
-            extracted_content, processed_files, skipped_files = sig_archive.quick_concat(g2_archive,
-                                                                                         separator=str('\n').encode('utf-8'),
-                                                                                         skip_missing=False, 
-                                                                                         filenames=filenames)
+            extracted_content, processed_files, skipped_files = sig_archive.quick_concat_to_bgzip(g2_archive,
+                                                                                                    separator=str('\n').encode('utf-8'),
+                                                                                                    skip_missing=False, 
+                                                                                                    filenames=filenames)
 
             extracted_reference.write_bytes(extracted_content)
             if extracted_reference.stat().st_size == 0:

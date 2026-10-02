@@ -37,7 +37,7 @@ def generate_report_file(rep_df: pd.DataFrame, o: str, fullreport_o: str, fmt: s
             'SIG_LEVEL', 'GENOME_COUNT', 'GENOME_SIZE', 'NOTE']
 
     # replace SIG_LEVEL back to their original ranks
-    major_ranks = {"superkingdom":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7, "strain":8}
+    major_ranks = {"domain":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7, "strain":8}
     major_ranks = {v:k for k,v in major_ranks.items()}
     rep_df['SIG_LEVEL'] = rep_df['SIG_LEVEL'].map(major_ranks)
 

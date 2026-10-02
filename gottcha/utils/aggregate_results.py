@@ -217,7 +217,7 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
     higher taxonomic ranks (species, genus, family, etc.). It applies the specified
     cutoff criteria to filter results and marks entries that fall below these thresholds.
 
-    The process of aggregating taxonomic data is done in a bottom-up manner, starting from the strain level and moving up to the superkingdom level.
+    The process of aggregating taxonomic data is done in a bottom-up manner, starting from the strain level and moving up to the domain level.
         1. First identify the taxon name and taxid at each major rank for each strain.
         2. Then, identify the strains that meet the cutoff criteria.
         3. For each rank starting from species, aggregate the qualify strains by summing up the relevant statistics (e.g., total mapped bases, read counts, etc.) to each rank.
@@ -241,7 +241,7 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
         pandas.DataFrame: DataFrame with rolled-up taxonomy at all ranks
     """
 
-    major_ranks = {"superkingdom":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7,"strain":8}
+    major_ranks = {"domain":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7,"strain":8}
 
     # total reads mapped to accession#s of interest
     total_aoi_read_count = str_df['AOI_READ_COUNT'].sum()
@@ -334,7 +334,7 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
 
         logging.debug(f"Processing rank: {rank} - {str_df['LVL_NAME'].tolist()}")
 
-        if rank=='superkingdom':
+        if rank=='domain':
             str_df[['PARENT_NAME', 'PARENT_TAXID']] = ['root', '1']
         else:
             str_df[['PARENT_NAME', 'PARENT_TAXID']] = str_df[[f'{ranks[idx+1]}_name', f'{ranks[idx+1]}_taxid']]

@@ -35,7 +35,7 @@ def parse_args(ver, args):
     command = args[0] if args and not args[0].startswith('-') else None
     parser_args = args[1:] if command else args
     taxonomic_levels = [
-        'superkingdom', 'phylum', 'class', 'order',
+        'domain', 'phylum', 'class', 'order',
         'family', 'genus', 'species', 'strain',
     ]
 
@@ -82,7 +82,7 @@ def parse_args(ver, args):
         choices=taxonomic_levels,
         help=(
             'Taxonomic level of the input database.\n'
-            'Choices: superkingdom, phylum, class, order, family, genus, species, strain.\n'
+            'Choices: domain, phylum, class, order, family, genus, species, strain.\n'
             'Auto-detected when the database prefix contains a rank, e.g. GOTTCHA_db.species.'
         ),
     )
@@ -431,7 +431,7 @@ def parse_args(ver, args):
 
     if not args_parsed.dbLevel:
         if args_parsed.database:
-            major_ranks = {"superkingdom":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7, "strain":8}
+            major_ranks = {"domain":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7, "strain":8}
             parts = args_parsed.database.split('.')
             for part in parts:
                 if part in major_ranks:

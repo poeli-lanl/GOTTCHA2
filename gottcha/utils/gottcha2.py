@@ -61,8 +61,8 @@ def parse_args(ver, args):
                     help="The path and prefix of the GOTTCHA2 database.")
 
     p.add_argument( '-l','--dbLevel', metavar='[LEVEL]', type=str, default='',
-                    choices=['superkingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species', 'strain'],
-                    help="""Specify the taxonomic level of the input database. You can choose one rank from "superkingdom", "phylum", "class", "order", "family", "genus", "species" and "strain". The value will be auto-detected if the input database ended with levels (e.g. GOTTCHA_db.species).""")
+                    choices=['domain', 'phylum', 'class', 'order', 'family', 'genus', 'species', 'strain'],
+                    help="""Specify the taxonomic level of the input database. You can choose one rank from "domain", "phylum", "class", "order", "family", "genus", "species" and "strain". The value will be auto-detected if the input database ended with levels (e.g. GOTTCHA_db.species).""")
 
     p.add_argument( '-ti','--taxInfo', metavar='[PATH]', type=str, default='',
                     help="""Specify the path to the taxonomy information directory or file. The program will attempt to locate a matching .tax.tsv file for the specified database. If it cannot find one, it will use the ‘taxonomy_db’ directory located in the same directory as the executable by default.""")
@@ -247,7 +247,7 @@ def parse_args(ver, args):
 
     if not args_parsed.dbLevel:
         if args_parsed.database:
-            major_ranks = {"superkingdom":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7, "strain":8}
+            major_ranks = {"domain":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7, "strain":8}
             parts = args_parsed.database.split('.')
             for part in parts:
                 if part in major_ranks:
@@ -1017,7 +1017,7 @@ def aggregate_taxonomy(str_df, abu_col, tg_rank, mc, mr, ml, mz, sni_score_speci
     higher taxonomic ranks (species, genus, family, etc.). It applies the specified
     cutoff criteria to filter results and marks entries that fall below these thresholds.
 
-    The process of aggregating taxonomic data is done in a bottom-up manner, starting from the strain level and moving up to the superkingdom level.
+    The process of aggregating taxonomic data is done in a bottom-up manner, starting from the strain level and moving up to the domain level.
         1. First identify the taxon name and taxid at each major rank for each strain.
         2. Then, identify the strains that meet the cutoff criteria.
         3. For each rank starting from species, aggregate the qualify strains by summing up the relevant statistics (e.g., total mapped bases, read counts, etc.) to each rank.
@@ -1043,7 +1043,7 @@ def aggregate_taxonomy(str_df, abu_col, tg_rank, mc, mr, ml, mz, sni_score_speci
         pandas.DataFrame: DataFrame with rolled-up taxonomy at all ranks
     """
 
-    major_ranks = {"superkingdom":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7,"strain":8}
+    major_ranks = {"domain":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7,"strain":8}
 
     # produce columns for the final report at each ranks
     rep_df = pd.DataFrame()
@@ -1077,7 +1077,7 @@ def aggregate_taxonomy(str_df, abu_col, tg_rank, mc, mr, ml, mz, sni_score_speci
         str_df['LEVEL'] = rank
         str_df[['LVL_NAME', 'LVL_TAXID']] = str_df[[f'{rank}_name', f'{rank}_taxid']]
 
-        if rank=='superkingdom':
+        if rank=='domain':
             str_df[['PARENT_NAME', 'PARENT_TAXID']] = ['root', '1']
         else:
             str_df[['PARENT_NAME', 'PARENT_TAXID']] = str_df[[f'{ranks[idx+1]}_name', f'{ranks[idx+1]}_taxid']]
@@ -1299,7 +1299,7 @@ def generate_taxonomy_file(rep_df, o, fullreport_o, fmt="tsv"):
 
 
     # replace SIG_LEVEL back to their original ranks
-    major_ranks = {"superkingdom":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7, "strain":8}
+    major_ranks = {"domain":1,"phylum":2,"class":3,"order":4,"family":5,"genus":6,"species":7, "strain":8}
     major_ranks = {v:k for k,v in major_ranks.items()}
     rep_df['SIG_LEVEL'] = rep_df['SIG_LEVEL'].map(major_ranks)
 
@@ -1640,7 +1640,7 @@ def loadDatabaseStats(db_stats_file):
         1. Rank
         2. Name
         3. Taxid
-        4. Superkingdom
+        4. Domain
         5. NumOfSeq
         6. Max
         7. Min

@@ -655,7 +655,7 @@ The full report (`<prefix>.full.tsv`) contains the fields below. The TSV/CSV sum
 
 | Field Name             | Description |
 | ---------------------- | ----------- |
-| LEVEL                  | Taxonomic rank (`superkingdom` through `strain`) |
+| LEVEL                  | Taxonomic rank (`domain` through `strain`) |
 | NAME                   | Taxon name |
 | TAXID                  | Taxonomy identifier from the selected database |
 | READ_COUNT             | Read count accumulated from accepted reference alignments |
