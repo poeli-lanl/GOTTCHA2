@@ -259,8 +259,6 @@ def main(argvs):
     elif argvs.format == "biom":
         outfile = Path(argvs.outdir) / f"{argvs.prefix}.biom"
 
-    out_fp = outfile.open("w", encoding="utf-8")
-
     if argvs.extractOnly:
         # repalce bamfile name from ".gottcha_\w+.bam" to ".log"
         logfile_prev = bamfile.with_suffix(".log")
@@ -636,9 +634,9 @@ def main(argvs):
             else:
                 # generate output results
                 if argvs.format == "biom":
-                    report.generate_biom_file(res_df, out_fp, argvs.dbLevel, argvs.prefix)
+                    report.generate_biom_file(res_df, outfile, argvs.dbLevel, argvs.prefix)
                 else:
-                    report.generate_report_file(res_df, out_fp, outfile_full, argvs.format)
+                    report.generate_report_file(res_df, outfile, outfile_full, argvs.format)
                 # generate lineage file
                 target_idx = (res_df['LEVEL']==argvs.dbLevel) & \
                                 (res_df['NOTE'].str.contains('Filtered out', na=False) == False) & \

@@ -187,8 +187,13 @@ def prepare_inputs(inputs, workdir, *, threads=1, no_variants=False):
     if vcfs or inputs.reference is None:
         return coverage, vcfs, node_file, edge_file
 
+    # Prepare a reference FASTA for variant calling, if not already provided.
     reference = workdir / "reference.fa.bgz"
-    _prepare_reference(inputs.reference, reference)
+    if inputs.reference.suffix in (".bgz"):
+        reference = inputs.reference
+    else:
+        _prepare_reference(inputs.reference, reference)
+    
     with pysam.AlignmentFile(str(inputs.bam), "rb") as bam, pysam.FastaFile(str(reference)) as fasta:
         lengths = dict(zip(fasta.references, fasta.lengths))
         mismatched = [name for name, length in zip(bam.references, bam.lengths)
@@ -199,17 +204,19 @@ def prepare_inputs(inputs, workdir, *, threads=1, no_variants=False):
                 f"missing or mismatched: {', '.join(mismatched[:5])}"
             )
 
-    pileup = workdir / "pileup.bcf"
+    pileup = workdir / f"{inputs.bam.stem}.pileup.bcf"
     vcf = workdir / f"{inputs.bam.stem}.vcf.gz"
-    bcftools.mpileup(
-        "-Ob", "-o", str(pileup), "-f", str(reference), "-q", "20", "-Q", "20",
-        "-a", "FORMAT/DP,FORMAT/AD", "--threads", str(threads), str(inputs.bam),
-        catch_stdout=False,
-    )
-    bcftools.call(
-        "-mv", "--ploidy", "1", "-Oz", "--threads", str(threads),
-        "-o", str(vcf), str(pileup), catch_stdout=False,
-    )
-    bcftools.index("-t", str(vcf), catch_stdout=False)
+    if len(inputs.vcfs) == 0:
+        bcftools.mpileup(
+            "-Ob", "-o", str(pileup), "-f", str(reference), "-q", "20", "-Q", "20",
+            "-a", "FORMAT/DP,FORMAT/AD", "--threads", str(threads), str(inputs.bam),
+            catch_stdout=False,
+        )
+        bcftools.call(
+            "-mv", "--ploidy", "1", "-Oz", "--threads", str(threads),
+            "-o", str(vcf), str(pileup), catch_stdout=False,
+        )
+        bcftools.index("-t", str(vcf), catch_stdout=False)
+        vcfs = [vcf]
 
-    return coverage, [vcf], node_file, edge_file
+    return coverage, vcfs, node_file, edge_file

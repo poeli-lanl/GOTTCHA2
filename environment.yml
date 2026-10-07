@@ -5,7 +5,7 @@ channels:
 dependencies:
   - python>=3.9
   - minimap2>=2.27
-  - samtools
+  - samtools>=1.2
   - pandas
   - numpy
   - biom-format>=2.1.7
