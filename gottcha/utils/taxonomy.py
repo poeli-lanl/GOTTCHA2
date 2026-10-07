@@ -222,7 +222,7 @@ def _loadAbbrJson(abbr_json_path: str) -> None:
             f.close
     else:
         major_level_to_abbr = {
-            "domain" : "sk",
+            "domain" : "d",
             "phylum"       : "p",
             "class"        : "c",
             "order"        : "o",
