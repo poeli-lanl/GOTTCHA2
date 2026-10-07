@@ -3,12 +3,14 @@
 import gzip
 import re
 import shutil
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
-
 import pysam
 from pysam import bcftools
+
+from .process_bam import write_taxid_network
 
 @dataclass
 class BrowserInputs:
@@ -18,6 +20,8 @@ class BrowserInputs:
     coverage: Optional[Path]
     reference: Optional[Path]
     vcfs: List[Path]
+    node_file: Optional[Path]
+    edge_file: Optional[Path]
 
 
 def _input_file(value, label):
@@ -33,7 +37,7 @@ def _sample_prefix(bam):
 
 def resolve_inputs(*, results=None, prefix=None, bam=None, coverage=None,
                    full=None, reference=None, vcfs=(), output=None,
-                   no_variants=False):
+                   no_variants=False, node_file=None, edge_file=None):
     """Match files by sample prefix; never choose arbitrarily among samples."""
     directory = Path(results).expanduser().resolve() if results else None
     if directory is not None and not directory.is_dir():
@@ -75,20 +79,50 @@ def resolve_inputs(*, results=None, prefix=None, bam=None, coverage=None,
                     "Specify --bam explicitly."
                 )
             bam = candidates[0]
+        
         if full is None:
             full = _input_file(directory / f"{prefix}.full.tsv", "Full taxonomy")
+            logging.debug(f"Using full taxonomy candidate: {full}")
+        
         if not no_variants:
             if not vcfs and bam is not None:
                 candidate = directory / f"{bam.stem}.vcf.gz"
                 if candidate.is_file():
                     vcfs = [candidate]
+                logging.debug(f"Using VCF candidate: {vcfs}")
             if reference is None and not vcfs:
                 # Prefer an already prepared reference over the original gzip.
-                for suffix in ("fa.bgz", "fa.gz", "fa", "fna.bgz", "fna.gz", "fna", "fasta"):
+                for suffix in ("fa.bgz", "fna.bgz", "fna.gz"):
                     candidate = directory / f"{prefix}.sylph_extracted.{suffix}"
                     if candidate.is_file():
                         reference = candidate
+                        logging.debug(f"Using reference candidate: {reference}")
                         break
+        
+        if node_file is None:
+            candidate = directory / f"{bam.stem}.nodes.tsv"
+            if candidate.is_file():
+                node_file = _input_file(candidate, "Nodes file")
+                logging.debug(f"Using node file candidate: {node_file}")
+            else:
+                node_file = None
+            
+        if edge_file is None:
+            candidate = directory / f"{bam.stem}.edges.tsv"
+            if candidate.is_file():
+                edge_file = _input_file(candidate, "Edges file")
+                logging.debug(f"Using edge file candidate: {edge_file}")
+            else:
+                edge_file = None
+
+        if coverage is None:
+            candidate = directory / f"{bam.stem}.coverage.tsv"
+            if candidate.is_file():
+                coverage = _input_file(candidate, "Coverage")
+                logging.debug(f"Using coverage candidate: {coverage}")
+            else:
+                coverage = None
+
 
     if bam is None and coverage is None:
         raise ValueError("Provide --results, --bam, or an existing --coverage file")
@@ -110,7 +144,7 @@ def resolve_inputs(*, results=None, prefix=None, bam=None, coverage=None,
     if output in [full, bam, coverage, reference, *vcfs]:
         raise ValueError("Output HTML must not overwrite an input file")
 
-    return BrowserInputs(full, output, bam, coverage, reference, [] if no_variants else vcfs)
+    return BrowserInputs(full, output, bam, coverage, reference, [] if no_variants else vcfs, node_file, edge_file)
 
 
 def _prepare_reference(reference, destination):
@@ -133,17 +167,33 @@ def prepare_inputs(inputs, workdir, *, threads=1, no_variants=False):
     workdir = Path(workdir)
     coverage = inputs.coverage
     if coverage is None:
-        coverage = workdir / "coverage.tsv"
+        coverage = workdir / f"{inputs.bam.stem}.coverage.tsv"
         pysam.coverage("-o", str(coverage), str(inputs.bam), catch_stdout=False)
+        logging.debug(f"Coverage file generated: {coverage}")
 
     vcfs = list(inputs.vcfs)
-    if no_variants:
-        return coverage, []
-    if vcfs or inputs.reference is None:
-        return coverage, vcfs
 
+    if inputs.bam and (inputs.node_file is None or inputs.edge_file is None):
+        node_file = workdir / f"{inputs.bam.stem}.nodes.tsv"
+        edge_file = workdir / f"{inputs.bam.stem}.edges.tsv"
+        write_taxid_network(str(inputs.bam), str(node_file), str(edge_file))
+        logging.debug(f"Taxa network files generated: {node_file}, {edge_file}")
+    else:
+        node_file = inputs.node_file
+        edge_file = inputs.edge_file
+
+    if no_variants:
+        return coverage, [], node_file, edge_file
+    if vcfs or inputs.reference is None:
+        return coverage, vcfs, node_file, edge_file
+
+    # Prepare a reference FASTA for variant calling, if not already provided.
     reference = workdir / "reference.fa.bgz"
-    _prepare_reference(inputs.reference, reference)
+    if inputs.reference.suffix in (".bgz"):
+        reference = inputs.reference
+    else:
+        _prepare_reference(inputs.reference, reference)
+    
     with pysam.AlignmentFile(str(inputs.bam), "rb") as bam, pysam.FastaFile(str(reference)) as fasta:
         lengths = dict(zip(fasta.references, fasta.lengths))
         mismatched = [name for name, length in zip(bam.references, bam.lengths)
@@ -154,16 +204,19 @@ def prepare_inputs(inputs, workdir, *, threads=1, no_variants=False):
                 f"missing or mismatched: {', '.join(mismatched[:5])}"
             )
 
-    pileup = workdir / "pileup.bcf"
+    pileup = workdir / f"{inputs.bam.stem}.pileup.bcf"
     vcf = workdir / f"{inputs.bam.stem}.vcf.gz"
-    bcftools.mpileup(
-        "-Ob", "-o", str(pileup), "-f", str(reference), "-q", "20", "-Q", "20",
-        "-a", "FORMAT/DP,FORMAT/AD", "--threads", str(threads), str(inputs.bam),
-        catch_stdout=False,
-    )
-    bcftools.call(
-        "-mv", "--ploidy", "1", "-Oz", "--threads", str(threads),
-        "-o", str(vcf), str(pileup), catch_stdout=False,
-    )
-    bcftools.index("-t", str(vcf), catch_stdout=False)
-    return coverage, [vcf]
+    if len(inputs.vcfs) == 0:
+        bcftools.mpileup(
+            "-Ob", "-o", str(pileup), "-f", str(reference), "-q", "20", "-Q", "20",
+            "-a", "FORMAT/DP,FORMAT/AD", "--threads", str(threads), str(inputs.bam),
+            catch_stdout=False,
+        )
+        bcftools.call(
+            "-mv", "--ploidy", "1", "-Oz", "--threads", str(threads),
+            "-o", str(vcf), str(pileup), catch_stdout=False,
+        )
+        bcftools.index("-t", str(vcf), catch_stdout=False)
+        vcfs = [vcf]
+
+    return coverage, vcfs, node_file, edge_file

@@ -80,8 +80,8 @@ class TestExtractReadsUtils(unittest.TestCase):
                     "PARENT_TAXID": "6",
                 },
                 {
-                    "LEVEL": "superkingdom",
-                    "NAME": "Superkingdom 6",
+                    "LEVEL": "domain",
+                    "NAME": "Domain 6",
                     "SNI_SCORE": 0.0,
                     "TAXID": "6",
                     "PARENT_TAXID": "0",

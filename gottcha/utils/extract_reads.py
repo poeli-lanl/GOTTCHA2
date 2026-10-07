@@ -68,7 +68,7 @@ def parse_taxids(taxid_arg: str,
     df_lineages = df[df['LEVEL']=='strain'].copy().reset_index(drop=True)
     df_lineages = df_lineages.rename(columns={'TAXID':'strain', 'PARENT_TAXID':'species'})
 
-    RANKS = ["species", "genus", "family", "order", "class", "phylum", "superkingdom"]
+    RANKS = ["species", "genus", "family", "order", "class", "phylum", "domain"]
 
     for idx, RANK in enumerate(RANKS):
         rank_df = df[df['LEVEL']==RANK].reset_index(drop=True).copy()

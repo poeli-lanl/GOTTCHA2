@@ -6,6 +6,7 @@ import bisect
 import gzip
 import os
 import json
+import logging
 import math
 import re
 import sys
@@ -13,11 +14,7 @@ import tempfile
 from pathlib import Path
 import pandas as pd
 from collections import defaultdict
-
-try:
-    import minify_html
-except ImportError:
-    minify_html = None
+import minify_html
 
 HTML_ASSET_DIR = os.path.realpath(
     os.path.join(os.path.dirname(__file__), '..', 'data', 'html')
@@ -3015,7 +3012,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     <div class="col-md-6">
                         <p><strong>Name:</strong> ${currentGenome.name}</p>
                         <p><strong>Taxid:</strong> ${currentGenome.taxid}</p>
-                        <p><strong>Domain:</strong> ${currentGenome.superkingdom}</p>
+                        <p><strong>Domain:</strong> ${currentGenome.domain}</p>
                     </div>
                     <div class="col-md-6">
                         <p><strong>Number of Sequences:</strong> ${currentGenome.numOfSeq}</p>
@@ -3244,7 +3241,7 @@ def parse_full_file(full_file, uniq_taxid_list):
             'parentName': parent_name,
             'sigCov': sig_cov,
             'taxid': taxid,
-            'superkingdom': row.get('SUPERKINGDOM', ''),
+            'domain': row.get('SUPERKINGDOM', ''),
             'numOfSeq': int(row.get('NUM_FRAG', 0)) if 'NUM_FRAG' in df.columns and not pd.isna(row.get('NUM_FRAG')) else 0,
             'max': int(row.get('LONGEST_SIG_LEN', 0)) if 'LONGEST_SIG_LEN' in df.columns and not pd.isna(row.get('LONGEST_SIG_LEN')) else 0,
             'min': int(row.get('SHORTEST_SIG_LEN', 0)) if 'SHORTEST_SIG_LEN' in df.columns and not pd.isna(row.get('SHORTEST_SIG_LEN')) else 0,
@@ -3275,7 +3272,7 @@ def parse_full_file(full_file, uniq_taxid_list):
             'parentName': parent_name,
             'sigCov': sig_cov,
             'taxid': taxid,
-            'superkingdom': row.get('SUPERKINGDOM', ''),
+            'domain': row.get('SUPERKINGDOM', ''),
             'readCount': read_count,
             'sniScore': sni_score
         })
@@ -3783,11 +3780,38 @@ def generate_html(
     # Write the HTML file
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(html_content)
-    
+
+
+def _render_report(coverage, full, vcfs, output, min_depth, node_file=None, edge_file=None):
+    """Render prepared local inputs; network data is optional."""
+    logging.info("Parsing coverage file...")
+    coverage_data, uniq_taxid_list = parse_coverage_file(coverage)
+    logging.info("Parsing full genome file...")
+    genome_data, species_data = parse_full_file(full, uniq_taxid_list)
+    logging.info("Parsing VCF files...")
+    variant_data, vcf_file_data = parse_vcf_files(
+        [str(path) for path in vcfs], coverage_data, min_depth=min_depth
+    )
+    logging.info("Generating coverage HTML...")
+    generate_html(
+        coverage_data, genome_data, species_data, output,
+        node_file=node_file, edge_file=edge_file, full_file=full,
+        variant_data=variant_data, vcf_file_data=vcf_file_data,
+        min_variant_depth=min_depth,
+    )
+
+
 def main(argv=None):
     """Main function to process files and generate visualization."""
-    parser = argparse.ArgumentParser(description='Generate an HTML-based genome coverage visualization')
+    standalone = not __package__
+    parser = argparse.ArgumentParser(
+        description='Generate an HTML-based genome coverage visualization',
+        epilog=('Standalone usage: -c COVERAGE -f FULL [-o HTML] [--vcf VCF ...]. '
+                'Uses existing files and skips BAM processing and taxid networks.'
+                if standalone else None),
+    )
     parser.add_argument('-r', '--results', '--result-dir', help='GOTTCHA2 result directory; discover matching files automatically')
+    parser.add_argument('--temp', help='Temporary working directory for intermediate files (default: results directory if specified, otherwise current directory)')
     parser.add_argument('-p', '--prefix', help='Sample prefix to select when the result directory contains multiple samples')
     source = parser.add_mutually_exclusive_group()
     source.add_argument('-b', '--bam', help='Coordinate-sorted GOTTCHA2 BAM; generate coverage automatically')
@@ -3795,7 +3819,10 @@ def main(argv=None):
     parser.add_argument('--reference', help='Signature reference FASTA (plain, gzip, or BGZF); enables haploid variant calling')
     parser.add_argument('-f', '--full',
                        help='Path to the full taxonomy profiling TSV with required columns')
-    parser.add_argument('-o', '--output', help='Output HTML (default: <prefix>.coverage.html beside the results/BAM)')
+    parser.add_argument('-o', '--output',
+                       default='coverage_visualization.html' if standalone else None,
+                       help=('Output HTML (default: coverage_visualization.html)' if standalone else
+                             'Output HTML (default: <prefix>.coverage.html beside the results/BAM)'))
     parser.add_argument('-t', '--threads', type=int, default=1, help='Threads for variant calling (default: 1)')
     parser.add_argument('-e', '--external', action='store_true',
                        help='Deprecated compatibility flag; resources are always embedded')
@@ -3803,27 +3830,23 @@ def main(argv=None):
     variants.add_argument('--vcf', action='append', nargs='+', default=[],
                        help='Path(s) to bgzip/gzip-compressed .vcf.gz files. May be used more than once. Each VCF must have a matching .tbi index.')
     variants.add_argument('--no-variants', action='store_true', help='Generate coverage only, skipping VCF discovery and variant calling')
+    parser.add_argument('--nodes', help='Path to the nodes TSV file')
+    parser.add_argument('--edges', help='Path to the edges TSV file')
     parser.add_argument('--min-depth', type=int, default=5,
                        help='Minimum INFO/DP depth required to keep a VCF variant (default: 5)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging')
-    
+    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+
+
     args = parser.parse_args(argv)
     if args.threads < 1:
         parser.error('--threads must be at least 1')
     if args.min_depth < 0:
         parser.error('--min-depth must be non-negative')
 
-    # The renderer remains executable as a standalone script as well as a subcommand.
-    if __package__:
-        from .coverage_browser_workflow import resolve_inputs, prepare_inputs
-        from .process_bam import write_taxid_network
-    else:
-        from coverage_browser_workflow import resolve_inputs, prepare_inputs
-        from process_bam import write_taxid_network
-    import pysam
-    import logging
-
-    if args.verbose:
+    if args.debug:
+        logging_level = logging.DEBUG
+    elif args.verbose:
         logging_level = logging.INFO
     else:
         logging_level = logging.WARNING
@@ -3834,46 +3857,60 @@ def main(argv=None):
         datefmt='%Y%m%d %H:%M:%S',
     )
 
+    if standalone:
+        if args.results or args.prefix or args.bam or args.reference:
+            parser.error('standalone mode uses existing files; use -c/--coverage, '
+                         '-f/--full and optionally --vcf instead of workflow inputs')
+        if not args.coverage or not args.full:
+            parser.error('standalone mode requires -c/--coverage and -f/--full')
+        output = Path(args.output)
+        try:
+            vcfs = _flatten_vcf_args(args.vcf)
+            _validate_vcf_inputs(vcfs)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix='.gottcha2-coverage-', dir=output.parent) as tmp:
+                temporary_html = Path(tmp) / 'coverage.html'
+                _render_report(args.coverage, args.full, vcfs, temporary_html, args.min_depth,
+                               node_file=args.nodes, edge_file=args.edges)
+                temporary_html.replace(output)
+        except (OSError, ValueError, RuntimeError) as exc:
+            parser.exit(1, f'Error: {exc}\n')
+        logging.info("Coverage HTML generated: %s", output)
+        return
+
+    # Workflow dependencies are only needed when called as a package subcommand.
+    from .coverage_browser_workflow import resolve_inputs, prepare_inputs
+    import pysam
+
     try:
         inputs = resolve_inputs(
             results=args.results, prefix=args.prefix, bam=args.bam, coverage=args.coverage,
             full=args.full, reference=args.reference, vcfs=_flatten_vcf_args(args.vcf),
-            output=args.output, no_variants=args.no_variants,
+            output=args.output, no_variants=args.no_variants, node_file=args.nodes, edge_file=args.edges,
         )
 
         _validate_vcf_inputs([str(path) for path in inputs.vcfs])
         inputs.output.parent.mkdir(parents=True, exist_ok=True)
         if not args.no_variants and not inputs.vcfs and inputs.reference is None:
             logging.warning('No reference FASTA or VCF found; generating coverage-only HTML.')
-        with tempfile.TemporaryDirectory(prefix='.gottcha2-coverage-', dir=inputs.output.parent) as tmp:
-            node_file = Path(args.results) / 'node.tsv'
-            edge_file = Path(args.results) / 'edge.tsv' 
-            if inputs.bam is not None:
-                logging.info("Writing taxid network to node and edge files...")
-                write_taxid_network(str(inputs.bam), str(node_file), str(edge_file))
-            else:
-                node_file = None
-                edge_file = None
-                logging.info("No BAM file provided; skipping taxid network generation...")
-            logging.info("Preparing inputs for coverage analysis...")
-            coverage, vcfs = prepare_inputs(inputs, tmp, threads=args.threads, no_variants=args.no_variants)
-            logging.info("Parsing coverage file...")
-            coverage_data, uniq_taxid_list = parse_coverage_file(coverage)
-            logging.info("Parsing full genome file...")
-            genome_data, species_data = parse_full_file(inputs.full, uniq_taxid_list)
-            logging.info("Parsing VCF files...")
-            variant_data, vcf_file_data = parse_vcf_files(
-                [str(path) for path in vcfs], coverage_data, min_depth=args.min_depth
-            )
-            temporary_html = Path(tmp) / 'coverage.html'
-            logging.info("Generating coverage HTML...")
-            generate_html(
-                coverage_data, genome_data, species_data, temporary_html,
-                node_file=node_file, edge_file=edge_file, full_file=inputs.full,
-                variant_data=variant_data, vcf_file_data=vcf_file_data,
-                min_variant_depth=args.min_depth,
-            )
-            temporary_html.replace(inputs.output)
+
+        # Determine the temporary working directory for intermediate files.
+        if args.temp is None and args.results is not None:
+            tmp = args.results
+        elif args.temp is not None:
+            tmp = args.temp
+        else:
+            tmp = inputs.output.parent
+
+        logging.info("Preparing inputs for coverage analysis...")
+        coverage, vcfs, node_file, edge_file = prepare_inputs(inputs, tmp, threads=args.threads, no_variants=args.no_variants)
+        logging.info(f"Inputs prepared: coverage={coverage}, vcfs={vcfs}, node_file={node_file}, edge_file={edge_file}")
+        temporary_html = Path(tmp) / 'coverage.html'
+        _render_report(
+            coverage, inputs.full, vcfs, temporary_html, args.min_depth,
+            node_file, edge_file,
+        )
+        temporary_html.replace(inputs.output)
     except (OSError, ValueError, RuntimeError, pysam.SamtoolsError) as exc:
         parser.exit(1, f'Error: {exc}\n')
 

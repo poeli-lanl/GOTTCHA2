@@ -222,7 +222,7 @@ def _loadAbbrJson(abbr_json_path: str) -> None:
             f.close
     else:
         major_level_to_abbr = {
-            "superkingdom" : "sk",
+            "domain" : "d",
             "phylum"       : "p",
             "class"        : "c",
             "order"        : "o",
@@ -371,14 +371,14 @@ def taxid2parent(tid: Union[int, str], norank: bool=False) -> str:
 
     return tid
 
-def name2taxid(name, rank=None, superkingdom=None, fuzzy=True, cutoff=0.7, max_matches=3, reset=False, expand=True) -> list:
+def name2taxid(name, rank=None, domain=None, fuzzy=True, cutoff=0.7, max_matches=3, reset=False, expand=True) -> list:
     """
     Get the taxonomic ID of a given taxonomic name.
     
     Args:
         name (str): Taxonomic scientific name.
         rank (str, optional): The expected rank of the taxonomic name.
-        superkingdom (str, optional): The expected superkingdom of the taxonomic name.
+        domain (str, optional): The expected domain of the taxonomic name.
         fuzzy (bool, optional): Whether to allow fuzzy search. Defaults to True.
         cutoff (float, optional): Similarity cutoff for difflib.get_close_matches(). 
             Only apply to `expand` mode. Cutoff will set to 1 if `fuzzy` set to False. Defaults to 0.7.
@@ -422,9 +422,9 @@ def name2taxid(name, rank=None, superkingdom=None, fuzzy=True, cutoff=0.7, max_m
                 idx = df_temp['rank']==rank
                 df_temp = df_temp[idx]
             
-            if superkingdom:
-                df_temp['sk'] = df_temp.taxid.apply(lambda x: taxid2nameOnRank(x, 'superkingdom'))
-                idx = df_temp['sk']==superkingdom
+            if domain:
+                df_temp['d'] = df_temp.taxid.apply(lambda x: taxid2nameOnRank(x, 'domain'))
+                idx = df_temp['d']==domain
                 df_temp = df_temp[idx]
             
             nameTid[name] = df_temp.head(max_matches).taxid.to_list()
@@ -654,7 +654,7 @@ def lca_taxid(taxids: list) -> str:
     """ lca_taxid
     Return lowest common ancestor (LCA) taxid of input taxids
     """
-    ranks = ['strain','species','genus','family','order','class','phylum','superkingdom']
+    ranks = ['strain','species','genus','family','order','class','phylum','domain']
 
     merged_dict = _autoVivification()
     for tid in taxids:
@@ -987,7 +987,7 @@ def loadTaxonomyTSV(tsv_taxonomy_file):
                 tid, depth, parent, rank, name = line.split('\t')
                 taxParents[tid] = parent
                 taxDepths[tid] = int(depth)
-                taxRanks[tid] = rank
+                taxRanks[tid] = rank if rank != "superkingdom" else "domain"
                 taxNames[tid] = name
                 if parent in taxNumChilds:
                     taxNumChilds[parent] += 1
@@ -1136,7 +1136,7 @@ def loadMgnifyTaxonomy(mgnify_taxonomy_file=None):
                             if p_name=="":
                                 p_name = f'{name} - no_{rank_abbr}_rank'
                         except:
-                            # for the superkingdom rank, assign parant taxid to 1 (root)
+                            # for the domain rank, assign parant taxid to 1 (root)
                             p_name = '1'
                             if not '1' in taxRanks: taxRanks['1'] = 'root'
                             if not '1' in taxNames: taxNames['1'] = 'root'
@@ -1222,13 +1222,13 @@ def loadGTDBTaxonomy(gtdb_taxonomy_file=None, gtdb_taxonomy_format="gtdb_metadat
                             if p_name=="":
                                 p_name = f'{name} - no_{p_rank_abbr}_rank'
                         except:
-                            # for the *first* taxa in lineage line (usually superkingdom), assign parant taxid to 1 (root)
+                            # for the *first* taxa in lineage line (usually domain), assign parant taxid to 1 (root)
                             p_name = '1'
                             if not '1' in taxRanks: taxRanks['1'] = 'root'
                             if not '1' in taxNames: taxNames['1'] = 'root'
 
                         if rank_abbr=='d':
-                            rank = 'superkingdom'
+                            rank = 'domain'
                         elif rank_abbr=='x':
                             rank = 'strain'
                         if rank_abbr in abbr_to_major_level:
