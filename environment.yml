@@ -15,5 +15,5 @@ dependencies:
   - sylph
   - pip
   - pip:
-    - minify_html
+    - minify_html>=0.18
   
