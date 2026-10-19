@@ -620,8 +620,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             font-weight: 760;
         }
 
-        /* Genome selector: normalize PrimeVue/Aura styling so the control and overlay
-           look like one component instead of a mix of theme defaults and local CSS. */
         .genome-select.p-select {
             align-items: stretch;
             background: var(--panel) !important;
@@ -732,6 +730,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             background: #ffffff !important;
             border-bottom: 1px solid var(--line) !important;
             padding: 10px !important;
+        }
+
+        .p-select-header .p-inputicon {
+            top: 35%;
+            margin-left: -1.7rem;
         }
 
         .p-select-filter {
