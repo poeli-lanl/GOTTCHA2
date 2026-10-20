@@ -5,6 +5,7 @@ import logging
 from typing import List, Tuple
 import pandas as pd
 import logging
+import shlex
 
 def minimap2(
     reads: List,
@@ -18,70 +19,89 @@ def minimap2(
     max_secondary: int = 50,
     secondary_ratio: float = 0.5,
 ) -> Tuple[int, str, int, bool]:
-    """Map reads to the GOTTCHA2 signature reference with minimap2.
+    """Map reads using minimap2 and remove SA tags from SAM output."""
 
-    Direct ONT mode requests primary, supplementary and a bounded set of
-    secondary candidate alignments. The command does not request supplementary
-    soft-clipping or minimap2 split-index prefix handling; the direct resolver
-    reconstructs original-read coordinates from S/H CIGAR
-    clipping and does not use MAPQ for species consistency.
-    """
-    input_file = " ".join(reads)
     mapped_re = re.compile(r"mapped (\d+) sequences")
     multi_part_index_flag = False
     input_read_count = 0
-    opts = mm_options.split()
 
-    opts.extend(["-x", presetx, "-a", "--eqx", "--sam-hit-only"])
-
-    if allow_secondary:
-        opts.extend(["--secondary=yes", f"-N{max_secondary}", f"-p{secondary_ratio}"])
-    else:
-        opts.extend(["--secondary=no"])
-
-    mm2_cmd = f"minimap2 {' '.join(opts)} -t{threads} {db} {input_file}"
-
-    # filter_cmd = ['samtools', 'view', '-x', 'SA']
-    filter_cmd = [
-        "awk", "-F", "\t",
-        "BEGIN{OFS=FS} !/^@/ {s=$1; for(i=2;i<=NF;i++) "
-        "if(i<=11 || $i !~ /^SA:Z:/) s=s OFS $i; print s}",
+    # Preset must precede custom minimap2 options.
+    opts = [
+        "-x", presetx,
+        *shlex.split(mm_options),
+        "-a",
+        "--eqx",
+        "--sam-hit-only",
     ]
 
-    with samfile.open("w", encoding="utf-8") as out_f:
+    if allow_secondary:
+        opts.extend([
+            "--secondary=yes",
+            "-N", str(max_secondary),
+            "-p", str(secondary_ratio),
+        ])
+    else:
+        opts.append("--secondary=no")
+
+    mm2_cmd = [
+        "minimap2",
+        *opts,
+        "-t", str(threads),
+        str(db),
+        *(str(r) for r in reads),
+    ]
+
+    # Remove SA:Z tags and existing SAM headers.
+    awk_cmd = [
+        "awk",
+        r'!/^@/ {sub(/\tSA:Z:[^\t]*/, ""); print}',
+    ]
+
+    with (samfile.open("w", encoding="utf-8") as out_f, logfile.open("a", encoding="utf-8") as log_f):
         mm2 = subprocess.Popen(
             mm2_cmd,
-            shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
         )
-        filter = subprocess.Popen(
-            filter_cmd,
+
+        filter_proc = subprocess.Popen(
+            awk_cmd,
             stdin=mm2.stdout,
             stdout=out_f,
-            stderr=mm2.stderr,
-            text=True,
-            bufsize=1,
+            stderr=log_f,
         )
 
+        # Allow SIGPIPE to propagate if awk exits early.
         mm2.stdout.close()
-        with logfile.open("a", encoding="utf-8") as f:
-            for line in mm2.stderr:
-                if "For a multi-part index" in line:
-                    multi_part_index_flag = True
-                match = mapped_re.search(line)
-                if match:
-                    logging.debug(line)
-                    input_read_count += int(match.group(1))
-                f.write(line)
+
+        # Capture minimap2 progress and warnings.
+        for line in mm2.stderr:
+            if "For a multi-part index" in line:
+                multi_part_index_flag = True
+
+            match = mapped_re.search(line)
+            if match:
+                logging.debug(line.strip())
+                input_read_count += int(match.group(1))
+
+            log_f.write(line)
 
         mm2.stderr.close()
-        rc_mm = mm2.wait()
-        filter.wait()
 
-    return rc_mm, mm2_cmd, input_read_count, multi_part_index_flag
+        rc_mm = mm2.wait()
+        rc_filter = filter_proc.wait()
+
+    if rc_mm != 0:
+        logging.error("minimap2 failed with exit code %s", rc_mm)
+
+    if rc_filter != 0:
+        logging.error("AWK filter failed with exit code %s", rc_filter)
+
+    rc = rc_mm if rc_mm != 0 else rc_filter
+
+    return rc, mm2_cmd, input_read_count, multi_part_index_flag
 
 
 def post_processing_sam(samfile: Path, samfile_temp: Path) -> Tuple[bool, int, int]:
