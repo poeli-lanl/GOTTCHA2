@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-__version__   = "2.5.1.1"
+__version__   = "2.5.1.2"
 __author__    = "Po-E (Paul) Li, B-GEN, Bioscience Division, Los Alamos National Laboratory"
 
 import argparse as ap
