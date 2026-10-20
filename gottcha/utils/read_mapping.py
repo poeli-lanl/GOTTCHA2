@@ -5,7 +5,6 @@ import logging
 from typing import List, Tuple
 import pandas as pd
 import logging
-import pandas as pd
 
 def minimap2(
     reads: List,
@@ -42,7 +41,12 @@ def minimap2(
 
     mm2_cmd = f"minimap2 {' '.join(opts)} -t{threads} {db} {input_file}"
 
-    filter_cmd = ['samtools', 'view', '-x', 'SA']
+    # filter_cmd = ['samtools', 'view', '-x', 'SA']
+    filter_cmd = [
+        "awk", "-F", "\t",
+        "BEGIN{OFS=FS} !/^@/ {s=$1; for(i=2;i<=NF;i++) "
+        "if(i<=11 || $i !~ /^SA:Z:/) s=s OFS $i; print s}",
+    ]
 
     with samfile.open("w", encoding="utf-8") as out_f:
         mm2 = subprocess.Popen(
