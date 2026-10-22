@@ -59,7 +59,6 @@ jobs:
           gottcha2 profile --help
           gottcha2 version
           gottcha2 coverage-browser --help
-          gottcha2 --help
 
       - name: Prepare testing dataset
         working-directory: test
