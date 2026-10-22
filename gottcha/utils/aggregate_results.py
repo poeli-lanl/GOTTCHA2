@@ -189,7 +189,7 @@ def group_refs_to_strains(ref_chunk_results: list, acc_list: list, acc_list_acti
     str_df['GENOME_COUNT'] = 1
 
     # infer total genome contents
-    str_df['GENOMIC_CONTENT_EST'] = str_df['TOTAL_BP_MAPPED']/str_df['TOTAL_SIG_LEN']*str_df['GENOME_SIZE']
+    str_df['GENOMIC_CONTENT_EST'] = str_df['DEPTH']*str_df['GENOME_SIZE']
 
     # estimate z-score
     str_df['ZSCORE'] = str_df.apply(lambda x: pile_lvl_zscore(x.TOTAL_BP_MAPPED, x.TOTAL_SIG_LEN, x.COVERED_SIG_LEN), axis=1)
@@ -391,8 +391,12 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
 
                     # # update the genome size to the representative genome size from species-level statistics + the total signature length of the strain
                     # lvl_df.loc[idx, "GENOME_SIZE"] = df_stats_species.loc[lvl_df.loc[idx].index, "GenomeSize"].values + lvl_df.loc[idx, "COVERED_SIG_LEN"]
-                    # update the total signature length to include the representative genome's total length
-                    lvl_df.loc[idx, "TOTAL_SIG_LEN"] = df_stats_species.loc[lvl_df.loc[idx].index, "TotalLength"].values + lvl_df.loc[idx, "COVERED_SIG_LEN"]
+                    # average multiple TotalLength values for each species before updating the total signature length
+                    species_total_lengths = df_stats_species.groupby(level=0)["TotalLength"].mean().round().astype(int)
+                    lvl_df.loc[idx, "TOTAL_SIG_LEN"] = (
+                        species_total_lengths.loc[lvl_df.loc[idx].index]
+                        + lvl_df.loc[idx, "COVERED_SIG_LEN"]
+                    )
 
                 lvl_df.loc[idx, "SIG_COV"] = lvl_df.loc[idx, "COVERED_SIG_LEN"]/lvl_df.loc[idx, "TOTAL_SIG_LEN"]
                 lvl_df.loc[idx, ["SNI_SCORE", "SNI_CI95_LH"]] = infer_sni_score(lvl_df.loc[idx, :], error_rate)

@@ -169,7 +169,7 @@ def convert_sam_to_bam(
     output_bam: str,
     threads: int = 4,
     quiet: bool = False,
-    compression_level: int = 1,
+    compression_level: int = 2,
 ) -> None:
     """
     Convert SAM to coordinate-sorted BAM with a minimal reference header.
