@@ -13,7 +13,3 @@ dependencies:
   - tqdm
   - pysam
   - sylph
-  - pip
-  - pip:
-    - minify_html>=0.18
-  

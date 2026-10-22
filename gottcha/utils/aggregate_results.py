@@ -189,7 +189,7 @@ def group_refs_to_strains(ref_chunk_results: list, acc_list: list, acc_list_acti
     str_df['GENOME_COUNT'] = 1
 
     # infer total genome contents
-    str_df['GENOMIC_CONTENT_EST'] = str_df['TOTAL_BP_MAPPED']/str_df['TOTAL_SIG_LEN']*str_df['GENOME_SIZE']
+    str_df['GENOMIC_CONTENT_EST'] = str_df['DEPTH']*str_df['GENOME_SIZE']
 
     # estimate z-score
     str_df['ZSCORE'] = str_df.apply(lambda x: pile_lvl_zscore(x.TOTAL_BP_MAPPED, x.TOTAL_SIG_LEN, x.COVERED_SIG_LEN), axis=1)

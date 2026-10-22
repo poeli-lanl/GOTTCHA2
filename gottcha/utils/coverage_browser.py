@@ -14,7 +14,13 @@ import tempfile
 from pathlib import Path
 import pandas as pd
 from collections import defaultdict
-import minify_html
+
+try:
+    import minify_html
+except ModuleNotFoundError as exc:
+    if exc.name != "minify_html":
+        raise
+    minify_html = None
 
 HTML_ASSET_DIR = os.path.realpath(
     os.path.join(os.path.dirname(__file__), '..', 'data', 'html')
