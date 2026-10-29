@@ -371,6 +371,11 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
                 'NOTE': lambda x: '; '.join(list(x.unique()))
             })
 
+            # Find the row index with the highest SNI_SCORE in each group
+            max_sni_idx = str_df.groupby('LVL_NAME')['SNI_SCORE'].idxmax()
+            # Get the corresponding TAXID
+            lvl_df['MAX_SNI_SCORE_TAXID'] = max_sni_idx.map(str_df['TAXID'])
+
             # find the index of the row with max SNI_SCORE in each group
             # pull out the low/high bounds from those rows
             idx = str_df.groupby('LVL_NAME')['SNI_SCORE'].idxmax()
@@ -379,6 +384,7 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
                         .set_index('LVL_NAME'))
             lvl_df = lvl_df.join(score_bounds)
 
+            # handle species-level signals for strains-level signature only cases
             if rank=="species":
                 # dealing with species that ONLY have strain-level signals
                 idx = (lvl_df['_SIG_LEVEL'] == 'strain')
@@ -387,20 +393,29 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
                     df_stats_species = df_stats.loc[df_stats['DB_level'] == 'species', ['TotalLength', 'GenomeSize']].copy().reset_index()
                     df_stats_species['SPECIES_NAME'] = df_stats_species['Taxid'].apply(lambda x: taxonomy.taxid2nameOnRank(x, 'species'))
                     df_stats_species = df_stats_species.set_index('SPECIES_NAME')
+                    species_total_lengths = df_stats_species.groupby(level=0)["TotalLength"].mean().round().astype(int)
                     logging.debug(f"Preparing species-level statistics for strains only: \n{df_stats_species}")
+
+                    # MAX_SNI_SCORE_TAXID records
+                    max_str_sni_idx =  str_df.TAXID.isin(lvl_df.loc[idx, "MAX_SNI_SCORE_TAXID"])
+                    handling_str_df = str_df[max_str_sni_idx].copy()
 
                     # # update the genome size to the representative genome size from species-level statistics + the total signature length of the strain
                     # lvl_df.loc[idx, "GENOME_SIZE"] = df_stats_species.loc[lvl_df.loc[idx].index, "GenomeSize"].values + lvl_df.loc[idx, "COVERED_SIG_LEN"]
                     # average multiple TotalLength values for each species before updating the total signature length
-                    species_total_lengths = df_stats_species.groupby(level=0)["TotalLength"].mean().round().astype(int)
-                    lvl_df.loc[idx, "TOTAL_SIG_LEN"] = (
-                        species_total_lengths.loc[lvl_df.loc[idx].index]
-                        + lvl_df.loc[idx, "COVERED_SIG_LEN"]
+
+                    handling_str_df["TOTAL_SIG_LEN"] = (
+                        handling_str_df["PARENT_NAME"].map(species_total_lengths)
+                        + handling_str_df["COVERED_SIG_LEN"]
                     )
 
-                lvl_df.loc[idx, "SIG_COV"] = lvl_df.loc[idx, "COVERED_SIG_LEN"]/lvl_df.loc[idx, "TOTAL_SIG_LEN"]
-                lvl_df.loc[idx, ["SNI_SCORE", "SNI_CI95_LH"]] = infer_sni_score(lvl_df.loc[idx, :], error_rate)
+                    handling_str_df["SIG_COV"] = handling_str_df["COVERED_SIG_LEN"]/handling_str_df["TOTAL_SIG_LEN"]
+                    handling_str_df[["SNI_SCORE", "SNI_CI95_LH"]] = infer_sni_score(handling_str_df, error_rate)
 
+                    # Map updated values back to lvl_df by species name
+                    updated = handling_str_df.set_index("PARENT_NAME")[["SNI_SCORE", "SNI_CI95_LH"]]
+                    for col in ["SNI_SCORE", "SNI_CI95_LH"]:
+                        lvl_df.loc[idx, col] = lvl_df.index[idx].map(updated[col])
 
             # reset the index after all the updates to get level names as a column
             lvl_df = lvl_df.reset_index()
