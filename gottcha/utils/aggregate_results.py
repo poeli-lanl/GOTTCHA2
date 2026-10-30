@@ -405,7 +405,7 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
                     # average multiple TotalLength values for each species before updating the total signature length
 
                     handling_str_df["TOTAL_SIG_LEN"] = (
-                        handling_str_df["PARENT_NAME"].map(species_total_lengths)
+                        handling_str_df["LVL_NAME"].map(species_total_lengths)
                         + handling_str_df["COVERED_SIG_LEN"]
                     )
 
@@ -413,7 +413,7 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
                     handling_str_df[["SNI_SCORE", "SNI_CI95_LH"]] = infer_sni_score(handling_str_df, error_rate)
 
                     # Map updated values back to lvl_df by species name
-                    updated = handling_str_df.set_index("PARENT_NAME")[["SNI_SCORE", "SNI_CI95_LH"]]
+                    updated = handling_str_df.set_index("LVL_NAME")[["SNI_SCORE", "SNI_CI95_LH"]]
                     for col in ["SNI_SCORE", "SNI_CI95_LH"]:
                         lvl_df.loc[idx, col] = lvl_df.index[idx].map(updated[col])
 
