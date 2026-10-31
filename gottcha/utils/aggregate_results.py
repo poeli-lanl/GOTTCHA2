@@ -396,13 +396,9 @@ def aggregate_taxonomy(str_df: pd.DataFrame,
                     species_total_lengths = df_stats_species.groupby(level=0)["TotalLength"].mean().round().astype(int)
                     logging.debug(f"Preparing species-level statistics for strains only: \n{df_stats_species}")
 
-                    # MAX_SNI_SCORE_TAXID records
-                    max_str_sni_idx =  str_df.TAXID.isin(lvl_df.loc[idx, "MAX_SNI_SCORE_TAXID"])
+                    # Updating SNI for MAX_SNI_SCORE_TAXID records, using species-level statistics for strains-only cases
+                    max_str_sni_idx = str_df.TAXID.isin(lvl_df.loc[idx, "MAX_SNI_SCORE_TAXID"])
                     handling_str_df = str_df[max_str_sni_idx].copy()
-
-                    # # update the genome size to the representative genome size from species-level statistics + the total signature length of the strain
-                    # lvl_df.loc[idx, "GENOME_SIZE"] = df_stats_species.loc[lvl_df.loc[idx].index, "GenomeSize"].values + lvl_df.loc[idx, "COVERED_SIG_LEN"]
-                    # average multiple TotalLength values for each species before updating the total signature length
 
                     handling_str_df["TOTAL_SIG_LEN"] = (
                         handling_str_df["LVL_NAME"].map(species_total_lengths)
