@@ -12,30 +12,72 @@ from pathlib import Path
 from typing import List, Optional, Union
 import logging
 
+def run_sylph_inspect(
+    database: str
+) -> tuple[int, int]:
+    """
+    Run sylph inspect command to get database information.
+    
+    Args:
+        database: Path to the sylph database
+    
+    Returns:
+        Tuple containing subsampling rate and kmer size
+    
+    Raises:
+        FileNotFoundError: If database doesn't exist
+        subprocess.CalledProcessError: If sylph inspect fails
+    """
+    if not Path(database).exists():
+        raise FileNotFoundError(f"Database not found: {database}")
+
+    cmd = ["sylph", "inspect", database]
+    logging.debug(f"COMMAND: {' '.join(cmd)}")
+
+    try:
+        inspection = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        fields = dict(
+            line.strip().split(":", 1)
+            for line in inspection.stdout.splitlines()[:3]
+            if ":" in line
+        )
+        subsampling_rate = int(fields["c"].strip())
+        kmer_size = int(fields["k"].strip())
+        logging.debug(f"Sylph subsampling rate: {subsampling_rate}, Kmer size: {kmer_size}")
+        return subsampling_rate, kmer_size
+    except (KeyError, ValueError) as e:
+        raise ValueError("Could not parse c and k from sylph inspect output") from e
+
 
 def run_sylph_sketch(
     read_file: str,
     outdir: str,
     threads: int = 1,
     subsampling_rate: int = 100,
+    kmer_size: int = 31,
     additional_args: Optional[List[str]] = None
 ) -> subprocess.CompletedProcess:
     """
     Run sylph sketch command.
     
     Args:
-        database: Path to the sylph database
-        read: Path to read file
-        output: Output file path
+        read_file: Path to read file
+        outdir: Output directory
         threads: Number of threads to use (default: 1)
         subsampling_rate: Subsampling rate (default: 100)
+        kmer_size: Kmer size (default: 31)
         additional_args: Additional arguments to pass to sylph sketch
     
     Returns:
         CompletedProcess object containing result information
     
     Raises:
-        FileNotFoundError: If database or read file don't exist
+        FileNotFoundError: If read file doesn't exist
         subprocess.CalledProcessError: If sylph sketch fails
     """
     # Handle read as single string
@@ -47,6 +89,7 @@ def run_sylph_sketch(
         "sylph", "sketch",
         "-t", str(threads),
         "-c", str(subsampling_rate),
+        "-k", str(kmer_size),
         "-d", str(outdir),
         "-r", str(read_file),
     ]
@@ -78,6 +121,8 @@ def run_sylph_query(
     reads: Union[str, List[str]],
     output: str,
     threads: int = 1,
+    subsampling_rate: int = 100,
+    kmer_size: int = 31,
     minimum_ani: float = 80.0,
     minimum_kmer: int = 5,
     read_seq_id: float = 99.5,
@@ -92,6 +137,7 @@ def run_sylph_query(
         output: Output file path
         threads: Number of threads to use (default: 1)
         subsampling_rate: Subsampling rate (default: 100)
+        kmer_size: Kmer size (default: 31)
         minimum_ani: Minimum ANI threshold (default: 80.0)
         additional_args: Additional arguments to pass to sylph query
     
@@ -105,24 +151,6 @@ def run_sylph_query(
     # Validate inputs
     if not Path(database).exists():
         raise FileNotFoundError(f"Database not found: {database}")
-
-    inspection = subprocess.run(
-        ["sylph", "inspect", database],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    fields = dict(
-        line.strip().split(":", 1)
-        for line in inspection.stdout.splitlines()[:3]
-        if ":" in line
-    )
-    try:
-        subsampling_rate = int(fields["c"].strip())
-        kmer_size = int(fields["k"].strip())
-        logging.debug(f"Sylph subsampling rate: {subsampling_rate}, Kmer size: {kmer_size}")
-    except (KeyError, ValueError) as e:
-        raise ValueError("Could not parse c and k from sylph inspect output") from e
 
     # Handle reads as list or single string
     if isinstance(reads, str):

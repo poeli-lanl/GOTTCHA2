@@ -421,13 +421,15 @@ def main(argvs):
             extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.bgz"
             
             # extract subsample (cXXX) rate from sylph_db string, default set to 100
-            subsampling_rate = 100
-            match = re.search(r'c(\d+)\.', sylph_db)
-            if match:
-                subsampling_rate = int(match.group(1))
-
             fast_min_kmer = argvs.fast_min_kmer
             fast_min_ani = argvs.fast_min_ani
+            sylph_subsampling_rate = 100
+            sylph_kmer = 31
+            
+            try:
+                sylph_subsampling_rate, sylph_kmer = prefilter.run_sylph_inspect(sylph_db)
+            except (FileNotFoundError, subprocess.CalledProcessError, ValueError) as e:
+                print_message(f"ERROR: Failed to inspect Sylph database: {e}", argvs.silent, begin_t, logfile, errorout=1)
 
             # Run Sylph sketch if the input file is in FASTA format
             if Path(sylph_input[0]).name.endswith(('.fa', '.fasta', '.fa.gz', '.fna', '.fna.gz', '.fasta.gz')):
@@ -437,7 +439,8 @@ def main(argvs):
                         read_file=sylph_input[0],
                         outdir=str(argvs.outdir),
                         threads=argvs.threads,
-                        subsampling_rate=subsampling_rate,
+                        subsampling_rate=sylph_subsampling_rate,
+                        kmer_size=sylph_kmer,
                     )
                 except (FileNotFoundError, subprocess.CalledProcessError) as e:
                     print_message(f"ERROR: prefiltering failed: {e}", argvs.silent, begin_t, logfile, errorout=1)
@@ -457,6 +460,8 @@ def main(argvs):
                     reads=sylph_input,
                     output=str(sylph_query_tsv),
                     threads=argvs.threads,
+                    subsampling_rate=sylph_subsampling_rate,
+                    kmer_size=sylph_kmer,
                     minimum_kmer=fast_min_kmer,
                     minimum_ani=fast_min_ani,
                     read_seq_id=float(100-argvs.errorRate*100)
