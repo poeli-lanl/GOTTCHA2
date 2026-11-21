@@ -78,7 +78,6 @@ def run_sylph_query(
     reads: Union[str, List[str]],
     output: str,
     threads: int = 1,
-    subsampling_rate: int = 100,
     minimum_ani: float = 80.0,
     minimum_kmer: int = 5,
     read_seq_id: float = 99.5,
@@ -106,7 +105,25 @@ def run_sylph_query(
     # Validate inputs
     if not Path(database).exists():
         raise FileNotFoundError(f"Database not found: {database}")
-    
+
+    inspection = subprocess.run(
+        ["sylph", "inspect", database],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    fields = dict(
+        line.strip().split(":", 1)
+        for line in inspection.stdout.splitlines()[:3]
+        if ":" in line
+    )
+    try:
+        subsampling_rate = int(fields["c"].strip())
+        kmer_size = int(fields["k"].strip())
+        logging.debug(f"Sylph subsampling rate: {subsampling_rate}, Kmer size: {kmer_size}")
+    except (KeyError, ValueError) as e:
+        raise ValueError("Could not parse c and k from sylph inspect output") from e
+
     # Handle reads as list or single string
     if isinstance(reads, str):
         reads = [reads]
@@ -120,6 +137,7 @@ def run_sylph_query(
         "sylph", "query",
         "-t", str(threads),
         "-c", str(subsampling_rate),
+        "-k", str(kmer_size),
         "--read-seq-id", str(read_seq_id),
         "--min-number-kmers", str(minimum_kmer),
         "--minimum-ani", str(minimum_ani),

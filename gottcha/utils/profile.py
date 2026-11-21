@@ -457,7 +457,6 @@ def main(argvs):
                     reads=sylph_input,
                     output=str(sylph_query_tsv),
                     threads=argvs.threads,
-                    subsampling_rate=subsampling_rate,
                     minimum_kmer=fast_min_kmer,
                     minimum_ani=fast_min_ani,
                     read_seq_id=float(100-argvs.errorRate*100)

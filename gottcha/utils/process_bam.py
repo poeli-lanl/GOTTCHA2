@@ -430,10 +430,13 @@ def parse_aln_from_bam(bam_path: str,
                 coverage = 100.0 * row[4] / region_length if region_length > 0 else 0.0
                 # MAPPED_BASES includes indels, which do not contribute to depth.
                 mean_depth = (row[8] - row[6]) / region_length if region_length > 0 else 0.0
-                f.write(
-                    f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[4]}\t"
-                    f"{coverage:.6g}\t{mean_depth:.6g}\t{row[11]:.6g}\t{row[12]:.6g}\n"
-                )
+                
+                # Only write rows with coverage (covbases > 0) to the output file.
+                if row[4]>0:
+                    f.write(
+                        f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[4]}\t"
+                        f"{coverage:.6g}\t{mean_depth:.6g}\t{row[11]:.6g}\t{row[12]:.6g}\n"
+                    )
 
     return ref_chunk_results
 
