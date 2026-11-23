@@ -6,6 +6,7 @@ Lightweight file archive using ZIP for random access to thousands of signature f
 import zipfile
 import io
 import gzip
+import fnmatch
 import shutil
 import sys
 import argparse
@@ -278,6 +279,29 @@ class FileArchive:
             List of filenames
         """
         return self._zipfile.namelist()
+
+    def search_files(self, pattern: Union[str, List[str]]) -> List[str]:
+        """Return archive member paths that match one or more shell-style patterns.
+
+        Each pattern is matched against a member's complete path as stored in
+        the ZIP archive. For example, ``"signatures/*.fna.gz"`` limits matches
+        to that directory, while ``"*.fna.gz"`` matches members with that
+        suffix anywhere in the archive. A matching member is returned only once
+        when patterns overlap.
+
+        Args:
+            pattern: A shell-style filename/path pattern or a list of patterns
+                (for example, ``"*.fna.gz"`` or
+                ``["signatures/9606/*", "metadata/*.json"]``).
+
+        Returns:
+            Archive member paths, in archive order, that match any pattern.
+        """
+        patterns = [pattern] if isinstance(pattern, str) else pattern
+        return [
+            filename for filename in self._zipfile.namelist()
+            if any(fnmatch.fnmatchcase(filename, item) for item in patterns)
+        ]
         
     def exists(self, filename: str) -> bool:
         """

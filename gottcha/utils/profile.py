@@ -418,7 +418,7 @@ def main(argvs):
             g2_archive = f"{argvs.database}.zip"
             sylph_query_tsv = Path(argvs.outdir) / f"{argvs.prefix}.sylph_query.tsv"
             queried_signatures_file = Path(argvs.outdir) / f"{argvs.prefix}.sylph_queried_signatures.txt"
-            extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sylph_extracted.fa.bgz"
+            extracted_reference = Path(argvs.outdir) / f"{argvs.prefix}.sig_extracted.fa.bgz"
             
             # extract subsample (cXXX) rate from sylph_db string, default set to 100
             fast_min_kmer = argvs.fast_min_kmer

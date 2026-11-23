@@ -3973,7 +3973,9 @@ def main(argv=None):
                 'Uses existing files and skips BAM processing and taxid networks.'
                 if standalone else None),
     )
-    parser.add_argument('-r', '--results', '--result-dir', help='GOTTCHA2 result directory; discover matching files automatically')
+    parser.add_argument('-r', '--result-dir', help='GOTTCHA2 result directory; discover matching files automatically')
+    parser.add_argument('-d', '--database', metavar='GOTTCHA2_DB', type=str, default=None,
+                        help='Path to the GOTTCHA2 database prefix, index file, or database directory.')
     parser.add_argument('--temp', help='Temporary working directory for intermediate files (default: results directory if specified, otherwise current directory)')
     parser.add_argument('-p', '--prefix', help='Sample prefix to select when the result directory contains multiple samples')
     source = parser.add_mutually_exclusive_group()
@@ -4021,7 +4023,7 @@ def main(argv=None):
     )
 
     if standalone:
-        if args.results or args.prefix or args.bam or args.reference:
+        if args.result_dir or args.prefix or args.bam or args.reference:
             parser.error('standalone mode uses existing files; use -c/--coverage, '
                          '-f/--full and optionally --vcf instead of workflow inputs')
         if not args.coverage or not args.full:
@@ -4046,10 +4048,13 @@ def main(argv=None):
     import pysam
 
     try:
+        g2_archive = f"{args.database}.zip"
+
         inputs = resolve_inputs(
-            results=args.results, prefix=args.prefix, bam=args.bam, coverage=args.coverage,
+            results=args.result_dir, prefix=args.prefix, bam=args.bam, coverage=args.coverage,
             full=args.full, reference=args.reference, vcfs=_flatten_vcf_args(args.vcf),
             output=args.output, no_variants=args.no_variants, node_file=args.nodes, edge_file=args.edges,
+            g2_archive=g2_archive
         )
 
         _validate_vcf_inputs([str(path) for path in inputs.vcfs])
@@ -4058,8 +4063,8 @@ def main(argv=None):
             logging.warning('No reference FASTA or VCF found; generating coverage-only HTML.')
 
         # Determine the temporary working directory for intermediate files.
-        if args.temp is None and args.results is not None:
-            tmp = args.results
+        if args.temp is None and args.result_dir is not None:
+            tmp = args.result_dir
         elif args.temp is not None:
             tmp = args.temp
         else:
