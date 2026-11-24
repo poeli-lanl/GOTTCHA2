@@ -134,6 +134,9 @@ def post_processing_sam(samfile: Path, samfile_temp: Path) -> Tuple[bool, int, i
 
     aln_count = len(df)
     logging.info(f'Total alignments in SAM file: {aln_count}')
+    if aln_count == 0:
+        logging.warning(f'No alignments found in SAM file: {samfile}')
+        return False, 0, 0
 
     df[['AS']] = df[['AS']].astype('int16')
 

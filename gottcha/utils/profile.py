@@ -543,6 +543,9 @@ def main(argvs):
         print_message("Removing multiple hits from SAM file...", argvs.silent, begin_t, logfile)
         samfile_temp = Path(argvs.outdir) / f"{argvs.prefix}.gottcha_{argvs.dbLevel}.sam.temp"
         flag, aln_count, top_hits_count = read_mapping.post_processing_sam(samfile, samfile_temp)
+        if aln_count == 0:
+            print_message(f"No alignments found. GOTTCHA2 analysis stopped.", argvs.silent, begin_t, logfile)
+            exit(0)
         if flag:
             samfile_temp.rename(samfile)
             # Note:
