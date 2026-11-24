@@ -174,6 +174,35 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GOTTCHA2 Signature Coverage</title>
+    <meta name="color-scheme" content="light dark">
+    <script>
+        (function () {
+            var root = document.documentElement;
+            var media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+            function stored() {
+                try { return localStorage.getItem('gottcha-theme'); } catch (e) { return null; }
+            }
+            function apply(dark) {
+                root.classList.toggle('dark-mode', dark);
+                root.setAttribute('data-bs-theme', dark ? 'dark' : 'light');
+                window.dispatchEvent(new CustomEvent('gottcha-themechange', { detail: { dark: dark } }));
+            }
+            window.gottchaTheme = {
+                isDark: function () { return root.classList.contains('dark-mode'); },
+                set: function (dark) {
+                    try { localStorage.setItem('gottcha-theme', dark ? 'dark' : 'light'); } catch (e) {}
+                    apply(dark);
+                }
+            };
+            var saved = stored();
+            apply(saved ? saved === 'dark' : !!(media && media.matches));
+            if (media && media.addEventListener) {
+                media.addEventListener('change', function (event) {
+                    if (!stored()) apply(event.matches);
+                });
+            }
+        })();
+    </script>
     <!-- D3.js v7 -->
     <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 
@@ -210,6 +239,76 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             --teal: #0f766e;
             --rose: #be3455;
             --shadow: 0 18px 45px rgba(31, 41, 55, 0.08);
+            --accent-hover: #1d4ed8;
+            --accent-ring: rgba(37, 99, 235, 0.16);
+            --line-hover: #9aa9bd;
+            --row-hover: #eef6ff;
+            --option-hover: #f1f5f9;
+            --overlay-bg: #ffffff;
+            --placeholder: #94a3b8;
+            --separator: #cbd5e1;
+            --badge-border: #bfdbfe;
+            --status-bg: #eef2f6;
+            --status-text: #475569;
+            --ok-bg: #ecfdf5;
+            --ok-border: #a7f3d0;
+            --ok-text: #065f46;
+            --warn-bg: #fff7ed;
+            --warn-border: #fed7aa;
+            --warn-text: #9a3412;
+            --axis-label: #697386;
+            --arrow-fill: #788697;
+            --fragment-bg: #e8eef6;
+            --network-link: #8a98aa;
+            --node-stroke: #ffffff;
+            --node-selected-stroke: #172033;
+            --label-halo: rgba(255, 255, 255, 0.94);
+            --modal-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+            --overlay-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+            color-scheme: light;
+        }
+
+        :root.dark-mode {
+            --bg: #0f1623;
+            --panel: #172033;
+            --panel-soft: #1c273b;
+            --text: #e6ebf4;
+            --muted: #9aa7bd;
+            --line: #2a364d;
+            --line-strong: #3a4863;
+            --accent: #3b82f6;
+            --accent-dark: #93c5fd;
+            --accent-soft: rgba(59, 130, 246, 0.22);
+            --teal: #2dd4bf;
+            --rose: #e0527a;
+            --shadow: 0 18px 45px rgba(0, 0, 0, 0.4);
+            --accent-hover: #2563eb;
+            --accent-ring: rgba(96, 165, 250, 0.35);
+            --line-hover: #53627f;
+            --row-hover: #1f2d46;
+            --option-hover: #22304a;
+            --overlay-bg: #172033;
+            --placeholder: #6b7a93;
+            --separator: #4a5873;
+            --badge-border: rgba(96, 165, 250, 0.4);
+            --status-bg: #222e45;
+            --status-text: #b6c2d6;
+            --ok-bg: rgba(16, 185, 129, 0.14);
+            --ok-border: rgba(52, 211, 153, 0.4);
+            --ok-text: #6ee7b7;
+            --warn-bg: rgba(249, 115, 22, 0.14);
+            --warn-border: rgba(251, 146, 60, 0.4);
+            --warn-text: #fdba74;
+            --axis-label: #9aa7bd;
+            --arrow-fill: #8896ab;
+            --fragment-bg: #2a364d;
+            --network-link: #6b7a93;
+            --node-stroke: #0f1623;
+            --node-selected-stroke: #f1f5f9;
+            --label-halo: rgba(15, 22, 35, 0.9);
+            --modal-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+            --overlay-shadow: 0 20px 45px rgba(0, 0, 0, 0.55);
+            color-scheme: dark;
         }
 
         * {
@@ -326,6 +425,33 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             font-weight: 760;
         }
 
+        .theme-toggle {
+            align-items: center;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            color: var(--muted);
+            cursor: pointer;
+            display: inline-flex;
+            font-size: 13px;
+            font-weight: 650;
+            gap: 7px;
+            min-height: 34px;
+            padding: 6px 12px;
+            transition: border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+            white-space: nowrap;
+        }
+
+        .theme-toggle:hover {
+            border-color: var(--accent);
+            color: var(--accent-dark);
+        }
+
+        .theme-toggle:focus-visible {
+            box-shadow: 0 0 0 3px var(--accent-ring);
+            outline: none;
+        }
+
         .toolbar {
             align-items: end;
             background: var(--panel);
@@ -366,8 +492,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .btn-primary:hover {
-            background: var(--accent-dark);
-            border-color: var(--accent-dark);
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
             box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
             transform: translateY(-1px);
         }
@@ -460,7 +586,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .btn-reset:focus-visible {
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+            box-shadow: 0 0 0 3px var(--accent-ring);
             outline: none;
         }
 
@@ -491,7 +617,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .axis-mode-button:focus-visible {
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+            box-shadow: 0 0 0 3px var(--accent-ring);
             outline: none;
         }
 
@@ -621,7 +747,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         .modal-content {
             border: 0;
             border-radius: 8px;
-            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+            box-shadow: var(--modal-shadow);
         }
 
         .modal-header,
@@ -655,13 +781,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .genome-select.p-select:not(.p-disabled):hover {
-            border-color: #9aa9bd !important;
+            border-color: var(--line-hover) !important;
         }
 
         .genome-select.p-select.p-focus,
         .genome-select.p-select[data-p-focused="true"] {
             border-color: var(--accent) !important;
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+            box-shadow: 0 0 0 3px var(--accent-ring) !important;
             outline: none;
         }
 
@@ -686,7 +812,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .genome-select .p-select-dropdown:hover {
-            background: #f1f5f9 !important;
+            background: var(--option-hover) !important;
             color: var(--text) !important;
         }
 
@@ -729,17 +855,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .genome-select-placeholder {
-            color: #94a3b8;
+            color: var(--placeholder);
             font-size: 14px;
             font-weight: 500;
         }
 
         .p-select-overlay,
         .p-select-panel {
-            background: #ffffff !important;
+            background: var(--overlay-bg) !important;
             border: 1px solid var(--line) !important;
             border-radius: 8px !important;
-            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18) !important;
+            box-shadow: var(--overlay-shadow) !important;
             color: var(--text) !important;
             margin-top: 4px;
             overflow: hidden;
@@ -748,7 +874,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         .p-select-header,
         .p-select-filter-container {
-            background: #ffffff !important;
+            background: var(--overlay-bg) !important;
             border-bottom: 1px solid var(--line) !important;
             padding: 10px !important;
         }
@@ -772,14 +898,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .p-select-filter:focus {
-            background: #ffffff !important;
+            background: var(--overlay-bg) !important;
             border-color: var(--accent) !important;
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10) !important;
+            box-shadow: 0 0 0 3px var(--accent-ring) !important;
         }
 
         .p-select-list-container,
         .p-select-list {
-            background: #ffffff !important;
+            background: var(--overlay-bg) !important;
         }
 
         .p-select-list {
@@ -787,7 +913,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .p-select-option {
-            background: #ffffff !important;
+            background: var(--overlay-bg) !important;
             border-radius: 6px !important;
             color: var(--text) !important;
             margin: 1px 0;
@@ -797,7 +923,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         .p-select-option.p-focus,
         .p-select-option:hover {
-            background: #f1f5f9 !important;
+            background: var(--option-hover) !important;
             color: var(--text) !important;
         }
 
@@ -809,7 +935,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .p-select-empty-message {
-            background: #ffffff !important;
+            background: var(--overlay-bg) !important;
             color: var(--muted) !important;
             padding: 12px !important;
         }
@@ -854,12 +980,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .genome-meta-separator {
-            color: #cbd5e1;
+            color: var(--separator);
         }
 
         .read-count {
             background: var(--accent-soft);
-            border: 1px solid #bfdbfe;
+            border: 1px solid var(--badge-border);
             border-radius: 999px;
             color: var(--accent-dark);
             flex: 0 0 auto;
@@ -945,7 +1071,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .variant-table tbody tr:hover {
-            background: #eef6ff;
+            background: var(--row-hover);
         }
 
         .variant-row-selected {
@@ -997,10 +1123,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .profile-status {
-            background: #eef2f6;
+            background: var(--status-bg);
             border: 1px solid var(--line);
             border-radius: 999px;
-            color: #475569;
+            color: var(--status-text);
             font-size: 12px;
             font-weight: 700;
             padding: 5px 12px;
@@ -1008,15 +1134,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .profile-status.qualified {
-            background: #ecfdf5;
-            border-color: #a7f3d0;
-            color: #065f46;
+            background: var(--ok-bg);
+            border-color: var(--ok-border);
+            color: var(--ok-text);
         }
 
         .profile-status.filtered {
-            background: #fff7ed;
-            border-color: #fed7aa;
-            color: #9a3412;
+            background: var(--warn-bg);
+            border-color: var(--warn-border);
+            color: var(--warn-text);
         }
 
         .profile-highlights {
@@ -1153,18 +1279,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
         .network-link {
             fill: none;
-            stroke: #8a98aa;
+            stroke: var(--network-link);
             stroke-opacity: 0.46;
         }
 
         .network-node {
             cursor: grab;
-            stroke: #ffffff;
+            stroke: var(--node-stroke);
             stroke-width: 2px;
         }
 
         .network-node.selected {
-            stroke: #172033;
+            stroke: var(--node-selected-stroke);
             stroke-width: 3px;
         }
 
@@ -1177,7 +1303,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             font-size: 11px;
             paint-order: stroke;
             pointer-events: none;
-            stroke: rgba(255, 255, 255, 0.94);
+            stroke: var(--label-halo);
             stroke-width: 4px;
             stroke-linejoin: round;
         }
@@ -1244,7 +1370,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
 
         .network-species-table tbody tr:hover {
-            background: #eef6ff;
+            background: var(--row-hover);
         }
 
         .network-species-table tr.network-species-row-selected {
@@ -1317,6 +1443,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             <div class="header-meta">
                 <span class="chip"><i class="pi pi-database"></i><strong>{{ genomeOptions.length.toLocaleString() }}</strong> genomes</span>
                 <span class="chip"><i class="pi pi-file"></i><strong>{{ vcfFiles.length.toLocaleString() }}</strong> VCF sources</span>
+                <button type="button" class="theme-toggle" @click="toggleTheme" :aria-pressed="isDark" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
+                    <i class="pi" :class="isDark ? 'pi-sun' : 'pi-moon'"></i>{{ isDark ? 'Light' : 'Dark' }}
+                </button>
             </div>
         </header>
 
@@ -1768,6 +1897,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     changeCoverageAxisMode(mode);
                 }
                 
+                const isDark = ref(window.gottchaTheme.isDark());
+                window.addEventListener('gottcha-themechange', (event) => {
+                    isDark.value = event.detail.dark;
+                });
+
+                function toggleTheme() {
+                    window.gottchaTheme.set(!isDark.value);
+                }
+
                 onMounted(() => {
                     initVisualization();
                     if (genomeOptions.length > 0) {
@@ -1780,6 +1918,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 });
 
                 return {
+                    isDark,
+                    toggleTheme,
                     selectedTaxid,
                     selectedGenome,
                     selectedGenomeOption,
@@ -1959,7 +2099,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 .style("text-anchor", "middle")
                 .style("font-size", "12px")
                 .style("font-weight", "700")
-                .style("fill", "#697386")
+                .style("fill", "var(--axis-label)")
                 .text(getBottomXAxisLabel());
             
             svg.append("text")
@@ -1968,7 +2108,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 .style("text-anchor", "middle")
                 .style("font-size", "12px")
                 .style("font-weight", "700")
-                .style("fill", "#697386")
+                .style("fill", "var(--axis-label)")
                 .text(getTopXAxisLabel());
             
             svg.append("text")
@@ -1976,7 +2116,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 .attr("y", 0 - margin.left)
                 .attr("x", 0 - (height / 2) - 5)
                 .attr("dy", "1em")
-                .style("fill", "#697386")
+                .style("fill", "var(--axis-label)")
                 .style("text-anchor", "middle")
                 .style("font-size", "12px")
                 .style("font-weight", "700")
@@ -2348,7 +2488,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 .attr('orient', 'auto')
                 .append('path')
                 .attr('d', 'M0,-4L8,0L0,4')
-                .attr('fill', '#788697');
+                .style('fill', 'var(--arrow-fill)');
 
             const maxNodeReads = d3.max(nodes, node => Number(node.readCount || 0)) || 1;
             const radiusScale = d3.scaleSqrt().domain([0, maxNodeReads]).range([8, 22]);
@@ -2574,7 +2714,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 .attr("y", d => yScale(d.meandepth))
                 .attr("width", getFragmentPixelWidth)
                 .attr("height", d => height - yScale(d.meandepth))
-                .attr("fill", "#e8eef6")
+                .style("fill", "var(--fragment-bg)")
                 .attr("rx", 5)
                 .attr("ry", 5);
             
@@ -2687,7 +2827,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 .attr("y1", yScale(overallMeanDepth))
                 .attr("x2", width)
                 .attr("y2", yScale(overallMeanDepth))
-                .attr("stroke", "#be3455")
+                .style("stroke", "var(--rose)")
                 .attr("stroke-width", 2)
                 .attr("stroke-opacity", 0.72)
                 .attr("stroke-dasharray", "5,5")
@@ -2966,8 +3106,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                         <div class="card mb-3 shadow-sm annotation-card">
                             <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-start">
-                                    <h5 class="text-dark">${anno.type}</h5>
-                                    <span class="badge bg-light text-dark">${anno.location || anno.start + '..' + anno.end}</span>
+                                    <h5>${anno.type}</h5>
+                                    <span class="badge bg-body-secondary text-body">${anno.location || anno.start + '..' + anno.end}</span>
                                 </div>`;
                         
                         // Display important qualifiers at the top
@@ -3833,7 +3973,9 @@ def main(argv=None):
                 'Uses existing files and skips BAM processing and taxid networks.'
                 if standalone else None),
     )
-    parser.add_argument('-r', '--results', '--result-dir', help='GOTTCHA2 result directory; discover matching files automatically')
+    parser.add_argument('-r', '--result-dir', help='GOTTCHA2 result directory; discover matching files automatically')
+    parser.add_argument('-d', '--database', metavar='GOTTCHA2_DB', type=str, default=None,
+                        help='Path to the GOTTCHA2 database prefix, index file, or database directory.')
     parser.add_argument('--temp', help='Temporary working directory for intermediate files (default: results directory if specified, otherwise current directory)')
     parser.add_argument('-p', '--prefix', help='Sample prefix to select when the result directory contains multiple samples')
     source = parser.add_mutually_exclusive_group()
@@ -3881,7 +4023,7 @@ def main(argv=None):
     )
 
     if standalone:
-        if args.results or args.prefix or args.bam or args.reference:
+        if args.result_dir or args.prefix or args.bam or args.reference:
             parser.error('standalone mode uses existing files; use -c/--coverage, '
                          '-f/--full and optionally --vcf instead of workflow inputs')
         if not args.coverage or not args.full:
@@ -3906,10 +4048,13 @@ def main(argv=None):
     import pysam
 
     try:
+        g2_archive = f"{args.database}.zip"
+
         inputs = resolve_inputs(
-            results=args.results, prefix=args.prefix, bam=args.bam, coverage=args.coverage,
+            results=args.result_dir, prefix=args.prefix, bam=args.bam, coverage=args.coverage,
             full=args.full, reference=args.reference, vcfs=_flatten_vcf_args(args.vcf),
             output=args.output, no_variants=args.no_variants, node_file=args.nodes, edge_file=args.edges,
+            g2_archive=g2_archive
         )
 
         _validate_vcf_inputs([str(path) for path in inputs.vcfs])
@@ -3918,8 +4063,8 @@ def main(argv=None):
             logging.warning('No reference FASTA or VCF found; generating coverage-only HTML.')
 
         # Determine the temporary working directory for intermediate files.
-        if args.temp is None and args.results is not None:
-            tmp = args.results
+        if args.temp is None and args.result_dir is not None:
+            tmp = args.result_dir
         elif args.temp is not None:
             tmp = args.temp
         else:

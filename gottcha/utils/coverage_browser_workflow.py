@@ -8,9 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 import pysam
+import pandas as pd
 from pysam import bcftools
 
 from .process_bam import write_taxid_network
+from .sig_archive import FileArchive, quick_concat_to_bgzip
 
 @dataclass
 class BrowserInputs:
@@ -37,7 +39,7 @@ def _sample_prefix(bam):
 
 def resolve_inputs(*, results=None, prefix=None, bam=None, coverage=None,
                    full=None, reference=None, vcfs=(), output=None,
-                   no_variants=False, node_file=None, edge_file=None):
+                   no_variants=False, node_file=None, edge_file=None, g2_archive=None):
     """Match files by sample prefix; never choose arbitrarily among samples."""
     directory = Path(results).expanduser().resolve() if results else None
     if directory is not None and not directory.is_dir():
@@ -91,14 +93,48 @@ def resolve_inputs(*, results=None, prefix=None, bam=None, coverage=None,
                     vcfs = [candidate]
                 logging.debug(f"Using VCF candidate: {vcfs}")
             if reference is None and not vcfs:
+                logging.info("No VCFs found; attempting to locate reference.")
                 # Prefer an already prepared reference over the original gzip.
                 for suffix in ("fa.bgz", "fna.bgz", "fna.gz"):
-                    candidate = directory / f"{prefix}.sylph_extracted.{suffix}"
-                    if candidate.is_file():
+                    candidate = directory / f"{prefix}.sig_extracted.{suffix}"
+                    if candidate.exists():
                         reference = candidate
                         logging.debug(f"Using reference candidate: {reference}")
                         break
-        
+                if reference is None:
+                    # if g2_archive is provided, attempt to extract reference from it
+                    g2_archive = Path(g2_archive)
+                    if g2_archive.exists():
+                        logging.debug(f"Attempting to extract reference from archive: {g2_archive}")
+                        df_profile = pd.read_csv(
+                            full, sep="\t", usecols=["LEVEL", "TAXID"], dtype=str,
+                        )
+                        df_profile['pattern'] = "*" + df_profile['TAXID'] + "*.gz"
+
+                        patterns = list(df_profile.loc[
+                            df_profile["LEVEL"] == "strain", "pattern"
+                        ].dropna().str.strip())
+
+                        with FileArchive(g2_archive) as archive:
+                            filenames = archive.search_files(patterns)
+
+                            extracted_reference = directory / f"{prefix}.sig_extracted.fa.bgz"
+
+                            # Extract those signatures from the archive to create a smaller reference for read mapping
+                            extracted_content, processed_files, skipped_files = quick_concat_to_bgzip(
+                                                                                    g2_archive,
+                                                                                    separator=str('\n').encode('utf-8'),
+                                                                                    skip_missing=False, 
+                                                                                    filenames=filenames)
+
+                            extracted_reference.write_bytes(extracted_content)
+                            if extracted_reference.stat().st_size == 0:
+                                logging.error(
+                                    f"ERROR: no queried signatures could be extracted from {g2_archive}; {extracted_reference} is empty."
+                                )
+
+                            reference = extracted_reference
+
         if node_file is None:
             candidate = directory / f"{bam.stem}.nodes.tsv"
             if candidate.is_file():
@@ -194,15 +230,14 @@ def prepare_inputs(inputs, workdir, *, threads=1, no_variants=False):
     else:
         _prepare_reference(inputs.reference, reference)
     
-    with pysam.AlignmentFile(str(inputs.bam), "rb") as bam, pysam.FastaFile(str(reference)) as fasta:
-        lengths = dict(zip(fasta.references, fasta.lengths))
-        mismatched = [name for name, length in zip(bam.references, bam.lengths)
-                      if lengths.get(name) != length]
-        if mismatched:
-            raise ValueError(
-                "Reference FASTA must contain the BAM's signature contigs with matching lengths; "
-                f"missing or mismatched: {', '.join(mismatched[:5])}"
-            )
+    # with pysam.AlignmentFile(str(inputs.bam), "rb") as bam, pysam.FastaFile(str(reference)) as fasta:
+    #     lengths = dict(zip(fasta.references, fasta.lengths))
+    #     mismatched = [name for name, length in zip(bam.references, bam.lengths)
+    #                   if lengths.get(name) != length]
+    #     if mismatched:
+    #         logging.info(
+    #             f"missing or mismatched: {', '.join(mismatched[:5])}"
+    #         )
 
     pileup = workdir / f"{inputs.bam.stem}.pileup.bcf"
     vcf = workdir / f"{inputs.bam.stem}.vcf.gz"

@@ -6,12 +6,16 @@ Lightweight file archive using ZIP for random access to thousands of signature f
 import zipfile
 import io
 import gzip
+import fnmatch
 import shutil
 import sys
 import argparse
 import logging
 import logging
 import tempfile
+import zlib
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Union, Optional, Iterator, Tuple
 from contextlib import contextmanager, ExitStack
@@ -275,6 +279,29 @@ class FileArchive:
             List of filenames
         """
         return self._zipfile.namelist()
+
+    def search_files(self, pattern: Union[str, List[str]]) -> List[str]:
+        """Return archive member paths that match one or more shell-style patterns.
+
+        Each pattern is matched against a member's complete path as stored in
+        the ZIP archive. For example, ``"signatures/*.fna.gz"`` limits matches
+        to that directory, while ``"*.fna.gz"`` matches members with that
+        suffix anywhere in the archive. A matching member is returned only once
+        when patterns overlap.
+
+        Args:
+            pattern: A shell-style filename/path pattern or a list of patterns
+                (for example, ``"*.fna.gz"`` or
+                ``["signatures/9606/*", "metadata/*.json"]``).
+
+        Returns:
+            Archive member paths, in archive order, that match any pattern.
+        """
+        patterns = [pattern] if isinstance(pattern, str) else pattern
+        return [
+            filename for filename in self._zipfile.namelist()
+            if any(fnmatch.fnmatchcase(filename, item) for item in patterns)
+        ]
         
     def exists(self, filename: str) -> bool:
         """
@@ -446,11 +473,120 @@ def quick_concat_to_bgzip(archive_path: Union[str, Path],
     return result, processed, skipped
 
 
+_COMPRESS_CHUNK = 1024 * 1024
+_SPOOL_MAX_SIZE = 32 * 1024 * 1024
+
+
+def _deflate_file(file_path: Path, archive_name: str):
+    """
+    Compress a file into a raw DEFLATE stream (as zipfile does), off the main thread.
+
+    zlib compression, crc32 and file reads release the GIL, so this scales with threads.
+    Returns (ZipInfo, spooled file holding the compressed bytes).
+    """
+    zinfo = zipfile.ZipInfo.from_file(file_path, archive_name)
+    zinfo.compress_type = zipfile.ZIP_DEFLATED
+    compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
+    spool = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_SIZE)
+    crc = 0
+    file_size = 0
+    try:
+        with open(file_path, 'rb') as src:
+            while True:
+                chunk = src.read(_COMPRESS_CHUNK)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                crc = zlib.crc32(chunk, crc)
+                spool.write(compressor.compress(chunk))
+        spool.write(compressor.flush())
+    except BaseException:
+        spool.close()
+        raise
+    zinfo.file_size = file_size
+    zinfo.CRC = crc
+    zinfo.compress_size = spool.tell()
+    spool.seek(0)
+    return zinfo, spool
+
+
+def _write_precompressed(zf: zipfile.ZipFile, zinfo: zipfile.ZipInfo, data) -> None:
+    """Append an already-deflated member to a seekable ZipFile opened for writing."""
+    zip64 = (zinfo.file_size > zipfile.ZIP64_LIMIT or
+             zinfo.compress_size > zipfile.ZIP64_LIMIT)
+    # Sizes and CRC are known up front, so no data descriptor is needed.
+    zinfo.flag_bits = 0
+    zf.fp.seek(zf.start_dir)
+    zinfo.header_offset = zf.fp.tell()
+    zf._writecheck(zinfo)
+    zf._didModify = True
+    zf.fp.write(zinfo.FileHeader(zip64))
+    shutil.copyfileobj(data, zf.fp, length=_COMPRESS_CHUNK)
+    zf.start_dir = zf.fp.tell()
+    zf.filelist.append(zinfo)
+    zf.NameToInfo[zinfo.filename] = zinfo
+
+
+def _archive_name(file_path: Path, preserve_structure: bool, base_path: Optional[Path]) -> str:
+    if preserve_structure and base_path:
+        return str(file_path.relative_to(base_path))
+    if preserve_structure:
+        return str(file_path)
+    return file_path.name
+
+
+def _add_files_parallel(archive: FileArchive,
+                        file_paths: List[Path],
+                        preserve_structure: bool,
+                        base_path: Optional[Union[str, Path]],
+                        callback: Optional[callable],
+                        threads: int) -> None:
+    """Compress files with a thread pool and write them to the archive in input order."""
+    zf = archive._zipfile
+    if zf is None or archive.mode not in ['w', 'a']:
+        raise ValueError("Archive must be opened in write or append mode")
+
+    base_path = Path(base_path) if base_path else None
+    total = len(file_paths)
+    # Bound in-flight results so memory/temp usage stays proportional to thread count.
+    max_pending = threads * 2
+    pending = deque()
+
+    def drain_one(idx):
+        file_path, future = pending.popleft()
+        zinfo, spool = future.result()
+        with spool:
+            _write_precompressed(zf, zinfo, spool)
+        if callback:
+            callback(idx, total, str(file_path))
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        try:
+            for file_path in file_paths:
+                name = _archive_name(file_path, preserve_structure, base_path)
+                pending.append((file_path, executor.submit(_deflate_file, file_path, name)))
+                if len(pending) >= max_pending:
+                    done += 1
+                    drain_one(done)
+            while pending:
+                done += 1
+                drain_one(done)
+        except BaseException:
+            for _, future in pending:
+                future.cancel()
+            for _, future in pending:
+                if not future.cancelled() and future.exception() is None:
+                    future.result()[1].close()
+            raise
+
+
 def archive_genomes(genome_files: List[Union[str, Path]], 
                    output_archive: Union[str, Path],
                    preserve_structure: bool = False,
                    base_path: Optional[Union[str, Path]] = None,
-                   verbose: bool = True) -> FileArchive:
+                   verbose: bool = True,
+                   threads: int = 1) -> FileArchive:
     """
     Archive a list of genome files into a single ZIP file.
     
@@ -460,6 +596,7 @@ def archive_genomes(genome_files: List[Union[str, Path]],
         preserve_structure: If True, preserve directory structure in archive
         base_path: Base path to strip when preserving structure
         verbose: If True, print progress information
+        threads: Number of threads used to compress files in parallel (1 = sequential)
         
     Returns:
         FileArchive instance (closed)
@@ -491,12 +628,22 @@ def archive_genomes(genome_files: List[Union[str, Path]],
     
     # Create the archive
     with FileArchive(output_archive, 'w') as archive:
-        archive.add_files(
-            genome_files,
-            preserve_structure=preserve_structure,
-            base_path=base_path,
-            callback=callback
-        )
+        if threads and threads > 1 and len(genome_files) > 1:
+            _add_files_parallel(
+                archive,
+                genome_files,
+                preserve_structure=preserve_structure,
+                base_path=base_path,
+                callback=callback,
+                threads=threads
+            )
+        else:
+            archive.add_files(
+                genome_files,
+                preserve_structure=preserve_structure,
+                base_path=base_path,
+                callback=callback
+            )
     
     if verbose:
         archive_size = Path(output_archive).stat().st_size
@@ -568,6 +715,8 @@ Examples:
                             help='Preserve directory structure in archive')
     output_group.add_argument('-b', '--base-path', 
                             help='Base path to strip when preserving structure')
+    output_group.add_argument('-t', '--threads', type=int, default=1,
+                            help='Number of threads for parallel compression (default: 1)')
     
     # Archive operations
     operation_group = parser.add_argument_group('Archive Operations')
@@ -778,7 +927,8 @@ def main():
                 args.output,
                 preserve_structure=args.preserve,
                 base_path=args.base_path,
-                verbose=verbose
+                verbose=verbose,
+                threads=args.threads
             )
             
     except Exception as e:
