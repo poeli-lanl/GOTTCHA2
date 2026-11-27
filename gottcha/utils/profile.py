@@ -431,28 +431,6 @@ def main(argvs):
             except (FileNotFoundError, subprocess.CalledProcessError, ValueError) as e:
                 print_message(f"ERROR: Failed to inspect Sylph database: {e}", argvs.silent, begin_t, logfile, errorout=1)
 
-            # Run Sylph sketch if the input file is in FASTA format
-            if Path(sylph_input[0]).name.endswith(('.fa', '.fasta', '.fa.gz', '.fna', '.fna.gz', '.fasta.gz')):
-                print_message("Generating sketchs for FASTA input reads...", argvs.silent, begin_t, logfile)
-                try:
-                    sylph_result = prefilter.run_sylph_sketch(
-                        read_file=sylph_input[0],
-                        outdir=str(argvs.outdir),
-                        threads=argvs.threads,
-                        subsampling_rate=sylph_subsampling_rate,
-                        kmer_size=sylph_kmer,
-                    )
-                except (FileNotFoundError, subprocess.CalledProcessError) as e:
-                    print_message(f"ERROR: prefiltering failed: {e}", argvs.silent, begin_t, logfile, errorout=1)
-
-                with logfile.open("a", encoding="utf-8") as f:
-                    if sylph_result.stdout:
-                        f.write(sylph_result.stdout)
-                    if sylph_result.stderr:
-                        f.write(sylph_result.stderr)
-                
-                sylph_input = [str(Path(argvs.outdir) / f"{Path(sylph_input[0]).name}.sylsp")]
-
             # Run Sylph query to get the list of signatures that are likely present in the input reads
             try:
                 sylph_result = prefilter.run_sylph_query(
