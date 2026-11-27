@@ -315,8 +315,8 @@ def parse_args(ver, args):
         '--fast-min-ani',
         metavar='INT',
         type=int,
-        default=80,
-        help='Minimum ANI for fast-profile prefiltering. [default: 80]',
+        default=75,
+        help='Minimum ANI for fast-profile prefiltering. [default: 75]',
     )
     
     logging_group = p.add_argument_group('Logging')
