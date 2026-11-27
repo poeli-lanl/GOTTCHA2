@@ -1,0 +1,5 @@
+gottcha2_database_test/
+gottcha2.egg-info/
+test/*output*/
+test/run.sh
+__pycache__/
